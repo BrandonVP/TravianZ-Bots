@@ -84,3 +84,7 @@ all villages to `gemma4:26b` (fallback `ornith:9b`) with a JSON schema. The vali
 
 - One dry round of every bot (decides, places no orders): `python -m travbot.main --once --dry-run`
   (`--only state-roman` for one bot). Point `TRAVBOT_STATE_DIR` at a copy of the state folders when the live bots run.
+
+## License
+
+GPLv3, like the game it plays - see [LICENSE](LICENSE).
