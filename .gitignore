@@ -1,0 +1,9 @@
+# runtime state: bot logins (passwords), plans, logs, status - never committed
+state/
+state-*/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
