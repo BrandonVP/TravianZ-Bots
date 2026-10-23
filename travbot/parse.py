@@ -187,7 +187,7 @@ def parse_dorf2(html):
     soup = _soup(html)
     buildings = {}
     for slot, title in _areas(soup).items():
-        if not 19 <= slot <= 40:
+        if not 19 <= slot <= 44:   # 41-44: the four extra building slots
             continue
         m = _LEVEL_TITLE.match(title)
         buildings[slot] = {"name": m.group(1), "level": int(m.group(2))} if m else None
@@ -369,6 +369,25 @@ def parse_send_confirm(html):
         for inp in form.find_all("input"):
             name = inp.get("name")
             if not name or inp.get("type") == "image":
+                continue
+            data[name] = inp.get("value", "")
+        data["s1"] = "ok"
+        return data
+    return None
+
+
+def parse_a2b_confirm(html):
+    """The confirm step of a troop order (a2b.php): form fields of the a=533374 form, or None if refused."""
+    soup = _soup(html)
+    for form in soup.find_all("form"):
+        if form.find("input", attrs={"name": "a", "value": "533374"}) is None:
+            continue
+        data = {}
+        for inp in form.find_all("input"):
+            name = inp.get("name")
+            if not name or inp.get("type") == "image":
+                continue
+            if inp.get("type") == "radio" and not inp.has_attr("checked"):
                 continue
             data[name] = inp.get("value", "")
         data["s1"] = "ok"

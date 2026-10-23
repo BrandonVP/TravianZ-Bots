@@ -6,7 +6,7 @@ upgrade link when the queue has room and resources suffice).
 
 WALLS = ("City Wall", "Earth Wall", "Palisade")
 RALLY_SLOT, WALL_SLOT = 39, 40
-INNER_SLOTS = range(19, 39)
+INNER_SLOTS = list(range(19, 39)) + list(range(41, 45))   # 41-44: extra building slots
 CANDIDATES_PER_CATEGORY = 3
 # Building targets can be blocked by requirements (the game offers no link), so look
 # further down the list before giving up on this tick.
@@ -24,7 +24,7 @@ def effective_buildings(state):
     out = {slot: dict(b) for slot, b in state["buildings"].items() if b}
     for job in state["queue"]:
         slot, lvl = job["slot"], job["to_level"] or 0
-        if 19 <= slot <= 40:
+        if 19 <= slot <= 44:
             current = out.get(slot)
             if current is None:
                 out[slot] = {"name": job["name"], "level": lvl}
