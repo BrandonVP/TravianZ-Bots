@@ -45,6 +45,15 @@ def field_candidates(state, plan):
                  "reason": f"net crop {res['crop']['prod']}/h below {plan['min_net_crop']}"}
                 for f in crop[:CANDIDATES_PER_CATEGORY]]
 
+    # gold mines (village gold for Plus and finishing builds): keep them level
+    # with the weakest resource field, cheapest mine first
+    mines = sorted((f for f in fields if f["kind"] == "gold"), key=lambda f: f["level"])
+    fields = [f for f in fields if f["kind"] != "gold"]
+    if mines and (not fields or mines[0]["level"] <= min(f["level"] for f in fields)):
+        return [{"action": "upgrade", "slot": f["slot"], "name": "Gold Mine",
+                 "reason": f"gold mine level {f['level']} behind the resource fields"}
+                for f in mines[:CANDIDATES_PER_CATEGORY]]
+
     weights = plan["resource_weights"]
 
     def score(f):

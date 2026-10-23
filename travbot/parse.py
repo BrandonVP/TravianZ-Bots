@@ -8,7 +8,9 @@ RESOURCES = ("wood", "clay", "iron", "crop")
 # Resource-bar cell ids in res.tpl: l4=wood, l3=clay, l2=iron, l1=crop.
 _RES_CELL = {"wood": "l4", "clay": "l3", "iron": "l2", "crop": "l1"}
 
-FIELD_KIND = {"Woodcutter": "wood", "Clay Pit": "clay", "Iron Mine": "iron", "Cropland": "crop"}
+FIELD_KIND = {"Woodcutter": "wood", "Clay Pit": "clay", "Iron Mine": "iron", "Cropland": "crop",
+              "Gold Mine": "gold"}   # gold mines: village gold, fields 45/46 (or a converted field)
+FIELD_SLOTS = set(range(1, 19)) | {45, 46}
 
 # e.g. "Woodcutter Level 3" or "Woodcutter Level 3 (upgrade in progress)"
 _LEVEL_TITLE = re.compile(r"^(.*?)\s+Level\s+(\d+)\b")
@@ -171,7 +173,7 @@ def parse_dorf1(html):
     soup = _soup(html)
     fields = []
     for slot, title in sorted(_areas(soup).items()):
-        if not 1 <= slot <= 18:
+        if slot not in FIELD_SLOTS:
             continue
         m = _LEVEL_TITLE.match(title)
         if not m or m.group(1) not in FIELD_KIND:
