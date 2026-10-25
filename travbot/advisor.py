@@ -46,13 +46,16 @@ PLAN_SCHEMA = {
         "defense": {
             "type": "object",
             "properties": {"unit_target": {"type": "integer"}, "budget_share": {"type": "number"},
-                           "emergency_share": {"type": "number"}},
+                           "emergency_share": {"type": "number"}, "reinforce": {"type": "boolean"},
+                           "reinforce_keep": {"type": "integer"}, "reinforce_share": {"type": "number"},
+                           "reinforce_radius": {"type": "integer"}},
             "required": ["unit_target", "budget_share", "emergency_share"],
         },
         "expansion": {
             "type": "object",
             "properties": {"enabled": {"type": "boolean"}, "max_villages": {"type": "integer"},
-                           "search_radius": {"type": "integer"}, "min_crop_fields": {"type": "integer"}},
+                           "search_radius": {"type": "integer"}, "min_crop_fields": {"type": "integer"},
+                           "ally_buffer": {"type": "integer"}},
             "required": ["enabled", "max_villages", "search_radius", "min_crop_fields"],
         },
         "gold": {
@@ -66,7 +69,8 @@ PLAN_SCHEMA = {
             "type": "object",
             "properties": {"enabled": {"type": "boolean"}, "young_ratio": {"type": "number"},
                            "donor_keep_share": {"type": "number"}, "fill_to": {"type": "number"},
-                           "min_shipment": {"type": "integer"}},
+                           "min_shipment": {"type": "integer"}, "allies": {"type": "boolean"},
+                           "ally_keep_share": {"type": "number"}},
             "required": ["enabled", "young_ratio", "donor_keep_share", "fill_to", "min_shipment"],
         },
     },
@@ -74,7 +78,7 @@ PLAN_SCHEMA = {
                  "save_up_hours", "building_targets", "defense", "expansion", "gold", "share"],
 }
 
-SYSTEM_PROMPT = """You are the strategy advisor for a bot playing TravianZ (a Travian 3 clone), tribe Gauls.
+SYSTEM_PROMPT = """You are the strategy advisor for a bot playing Empires of Rome (a Roman-era browser strategy game), tribe Gauls.
 The bot upgrades resource fields, constructs/upgrades buildings, trains the basic defensive unit (Phalanx) in
 the Barracks, founds new villages with settlers, spends village gold on "Finish now" and ships surplus resources
 from rich villages to young ones through the Marketplace. It does not attack or research. The same plan is
@@ -94,8 +98,12 @@ You do not act directly. You write a plan that a rules engine follows until your
 - defense.unit_target: Phalanxes to keep in each village (0-1000). Each costs 100 wood, 130 clay, 55 iron,
   30 crop and 1 crop/h upkeep. defense.budget_share (0-0.9): share of resources the bot may spend on them per
   round; defense.emergency_share (0-1): share it may spend while an attack is incoming.
+  defense.reinforce (true/false): villages within reinforce_radius tiles (1-50) send reinforcements to own or
+  allied villages with an incoming attack: reinforce_share (0-1) of their defenders above reinforce_keep (always
+  stay home); villages that are attacked themselves never send.
 - expansion: enabled (true/false); max_villages; search_radius (tiles, 2-15) for free valleys; min_crop_fields
-  (6 = normal valley). Founding needs Residence 10, 3 settlers (expensive), culture points and a Rally Point.
+  (6 = normal valley); ally_buffer (0-10): skip valleys this close to an allied bot's village or settling
+  target. Founding needs Residence 10, 3 settlers (expensive), culture points and a Rally Point.
 - gold: finish_now (true/false) spends 50 village gold to finish a running build job at once, longest jobs first,
   only jobs with at least min_minutes_left (when the village's gold is nearly full: 5 min); every village keeps
   `reserve` gold, the capital keeps `capital_reserve` (the capital pays the weekly Plus + production bonus
@@ -103,7 +111,8 @@ You do not act directly. You write a plan that a rules engine follows until your
 - share: enabled (true/false); a village producing less than young_ratio (0-1) of the richest village is "young"
   and gets resources from the richest villages that have a Marketplace, up to fill_to (0.1-1) of its storage;
   a donor never drops below donor_keep_share (0-0.95) of its storage; shipments under min_shipment are skipped.
-  Merchants (one per Marketplace level) each carry a lot on this server, so more Marketplace levels = bigger shipments.
+  share.allies (true/false) also ships to young villages of the allied bots (same alliance), the donor keeping
+  at least ally_keep_share (0-0.95) of its storage. Merchants (one per Marketplace level) each carry a lot on this server, so more Marketplace levels = bigger shipments.
 
 Construction requirements (a building cannot be started before these are met; the bot skips such targets):
 - Warehouse, Granary, Embassy: Main Building 1. Cranny, Rally Point, Palisade: none.
@@ -168,7 +177,7 @@ def system_prompt(tribe):
     out = SYSTEM_PROMPT.replace("tribe Gauls", "tribe " + TRIBE_NAMES.get(tribe, f"{tribe}"))
     out = out.replace("Each costs 100 wood, 130 clay, 55 iron,\n  30 crop and 1 crop/h upkeep.",
                       "Each costs resources and 1 crop/h upkeep.")
-    out = out.replace("Phalanxes", unit + "s").replace("Phalanx", unit)
+    out = out.replace("Phalanxes", units.plural(unit)).replace("Phalanx", unit)
     out = out.replace("Palisade", {1: "City Wall", 2: "Earth Wall"}.get(tribe, "Palisade"))
     return out
 
@@ -240,12 +249,12 @@ class Advisor:
             return None
         who = TRIBE_NAMES.get(self.tribe, "a tribe")
         if kind == "invite":
-            task = (f"You are {ctx['me']}, a chieftain of the {who} in a Travian-style game. You have founded the "
+            task = (f"You are {ctx['me']}, a chieftain of the {who} in Empires of Rome, a Roman-era strategy game. You have founded the "
                     f"alliance \"{ctx['alliance']}\" [{ctx['tag']}] and just invited your neighbour {ctx['to']} to join "
                     f"(the invitation waits at their Embassy). Write them a short, warm, in-character letter asking "
                     f"them to join: mutual protection, shared surplus, growing together.")
         elif kind == "accept":
-            task = (f"You are {ctx['me']}, a chieftain of the {who} in a Travian-style game. You just accepted "
+            task = (f"You are {ctx['me']}, a chieftain of the {who} in Empires of Rome, a Roman-era strategy game. You just accepted "
                     f"{ctx['to']}'s invitation and joined the alliance \"{ctx['alliance']}\". Write {ctx['to']} a short, "
                     f"in-character letter of thanks and loyalty.")
         else:
