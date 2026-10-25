@@ -42,10 +42,12 @@ class Expansion:
         tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
         tmp.replace(self.path)
 
-    def step(self, client, vid, coords, state, plan, tribe, village_count, reserved):
+    def step(self, client, vid, coords, state, plan, tribe, village_count, reserved, avoid=()):
         """Do at most one expansion step for the current village. Returns a log message or None.
 
         `reserved` is the save-up reservation (dict with "cost") or None; settler training respects it.
+        `avoid`: (x, y) of allied villages and their settling targets; valleys within
+        expansion.ally_buffer tiles of them are left to the allies.
         """
         exp = plan["expansion"]
         if not exp["enabled"] or village_count >= exp["max_villages"]:
@@ -91,11 +93,13 @@ class Expansion:
         if time.time() - vs.get("last_send_attempt", 0) < SEND_RETRY_S:
             return None
         bad = set(vs["bad"])
-        good = [v for v in vs["valleys"]
-                if v["wref"] not in bad and v["fields"][3] >= exp["min_crop_fields"]]
+        buf = exp.get("ally_buffer", 0)
+        free = [v for v in vs["valleys"] if v["wref"] not in bad
+                and not any(max(abs(v["x"] - ax), abs(v["y"] - ay)) <= buf for ax, ay in avoid)]
+        good = [v for v in free if v["fields"][3] >= exp["min_crop_fields"]]
         if not good:
             if vs["radius"] >= exp["search_radius"]:
-                good = [v for v in vs["valleys"] if v["wref"] not in bad]  # settle for any valley
+                good = free  # settle for any valley
             if not good:
                 return None
         target = min(good, key=lambda v: math.hypot(v["x"] - cx, v["y"] - cy))

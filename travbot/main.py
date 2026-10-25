@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import logging.handlers
+import math
 import os
 import pathlib
 import random
@@ -29,7 +30,7 @@ import requests
 from . import plan as planmod
 from . import rules, units, web
 from .advisor import Advisor
-from .client import GameClient, GameError
+from .client import GameClient, GameError, tile_id
 from .diplomacy import Diplomacy, template_letter
 from .expand import Expansion
 
@@ -37,6 +38,8 @@ log = logging.getLogger("travbot")
 
 MIN_SLEEP, MAX_SLEEP, IDLE_SLEEP, ERROR_SLEEP = 60, 15 * 60, 10 * 60, 120
 ATTACK_SLEEP = 120  # check more often while an attack is incoming
+REINFORCE_COOLDOWN_S = 3600  # one round of help per attacked village per hour
+ALLY_STATUS_MAX_AGE_S = 2 * 3600  # ignore an allied bot's status.json older than this
 
 
 FMT = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
@@ -67,6 +70,29 @@ def discover_state_dirs(primary):
     return [primary] + extra
 
 
+def ally_status(state_dir):
+    """status.json of the other bots in the same alliance (their state folders sit next to this one)."""
+    def alliance(d):
+        try:
+            return json.loads((d / "diplomacy_state.json").read_text(encoding="utf-8")).get("alliance")
+        except (OSError, ValueError, AttributeError):
+            return None
+    mine = alliance(state_dir)
+    if not mine:
+        return []
+    out = []
+    for d in sorted(state_dir.parent.glob("state*")):
+        if d.resolve() == state_dir.resolve() or not (d / "bot-account.json").is_file() or alliance(d) != mine:
+            continue
+        try:
+            st = json.loads((d / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if time.time() - st.get("updated", 0) <= ALLY_STATUS_MAX_AGE_S:
+            out.append(st)
+    return out
+
+
 def write_json(path, data):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -81,6 +107,8 @@ class Bot:
         self.dry_run = dry_run
         self.diplomacy = diplomacy
         self.expansion = Expansion(state_dir)
+        self.state_dir = state_dir
+        self.allies = []  # status of the allied bots, refreshed every tick
         self.coords = {}  # village id -> (x, y)
         self.vname = ""   # village being handled, for log lines
         self.capital = None        # capital village id (keeps the bigger gold reserve)
@@ -164,32 +192,44 @@ class Bot:
     def share(self, villages, plan):
         """Ship surplus from the richest villages (with a Marketplace) to young ones. Returns actions."""
         sp = plan["share"]
-        if not sp["enabled"] or len(villages) < 2:
+        if not sp["enabled"]:
             return []
         richest = max(rules.total_production(v["state"]) for v in villages)
         young = [v for v in villages if rules.is_young(v["state"], richest, sp) and v["x"] is not None]
         donors = sorted((v for v in villages if v not in young and rules.find_slot(v["state"], "Marketplace")),
                         key=lambda v: -rules.total_production(v["state"]))
+        if sp["allies"]:  # young villages of the allied bots (not while they are being attacked)
+            for a in self.allies:
+                for av in a.get("villages", []):
+                    st = {"resources": av["resources"]}
+                    if av.get("coords") and not (av.get("incoming") or {}).get("attacks") \
+                            and rules.is_young(st, richest, sp):
+                        x, y = av["coords"]
+                        young.append({"id": tile_id(x, y), "name": f"{a.get('account')}'s {av['name']}",
+                                      "x": x, "y": y, "state": st, "ally": True})
         actions = []
         for r in young:
+            rsp = {**sp, "donor_keep_share": max(sp["donor_keep_share"], sp["ally_keep_share"])} if r.get("ally") else sp
             wref = r["id"]
             # what the young village will hold once this tick's shipments arrive (the next donor tops up the rest)
             r = {**r, "state": {**r["state"], "resources": {k: dict(v) for k, v in r["state"]["resources"].items()}}}
             for d in donors:
                 self.vname = d["name"]
                 slot = rules.find_slot(d["state"], "Marketplace")
-                self.client.select_village(d["id"])
+                if d["id"] is not None:
+                    self.client.select_village(d["id"])
                 m = self.client.market(slot)
                 if not m or m["merchants"] <= 0 or wref in m["sending_to"]:
                     continue  # no free merchants, or a shipment to this village is already on its way
                 state = self.client.village()
-                ship = rules.shipment(state, r["state"], m["merchants"], m["carry"], sp,
+                ship = rules.shipment(state, r["state"], m["merchants"], m["carry"], rsp,
                                       (d.get("reserved") or {}).get("cost"))
                 if not ship:
                     continue
-                log.info("[%s] %ssend %s to %s (%s|%s): young village", d["name"],
+                log.info("[%s] %ssend %s to %s (%s|%s): young %s", d["name"],
                          "[dry-run] " if self.dry_run else "",
-                         ", ".join(f"{k} {n}" for k, n in ship.items() if n), r["name"], r["x"], r["y"])
+                         ", ".join(f"{k} {n}" for k, n in ship.items() if n), r["name"], r["x"], r["y"],
+                         "allied village" if r.get("ally") else "village")
                 ok = True if self.dry_run else self.client.send_resources(slot, r["x"], r["y"], ship)
                 if not ok:
                     log.info("[%s] the game refused the shipment to %s", d["name"], r["name"])
@@ -199,6 +239,68 @@ class Bot:
                                 "village": d["name"], "time": int(time.time())})
                 for k, n in ship.items():
                     r["state"]["resources"][k]["amount"] += n
+        return actions
+
+    def _ally_tiles(self):
+        """(x, y) of the allied bots' villages and of the valleys they are settling."""
+        out = []
+        for a in self.allies:
+            out += [tuple(v["coords"]) for v in a.get("villages", []) if v.get("coords")]
+            out += [(s["sent"]["x"], s["sent"]["y"]) for s in (a.get("expansion") or {}).values()
+                    if isinstance(s, dict) and s.get("sent")]
+        return out
+
+    def reinforce(self, villages, plan):
+        """Send defenders to own or allied villages with incoming attacks (reinforcement). Returns actions."""
+        d = plan["defense"]
+        if not d["reinforce"] or d["reinforce_share"] <= 0:
+            return []
+        targets = [{"name": v["name"], "coords": self.coords.get(v["id"]), "incoming": v["state"]["incoming"]}
+                   for v in villages]
+        for a in self.allies:
+            targets += [{"name": f"{a.get('account')}'s {v['name']}", "coords": v.get("coords"),
+                         "incoming": v.get("incoming") or {}} for v in a.get("villages", [])]
+        targets = [t for t in targets if t["coords"] and (t["incoming"].get("attacks") or 0) > 0]
+        if not targets:
+            return []
+        path = self.state_dir / "reinforce.json"
+        try:
+            sent = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            sent = {}
+        unit = rules.basic_defender(self.tribe)
+        now, actions = time.time(), []
+        for t in targets:
+            tx, ty = t["coords"]
+            key = f"{tx}|{ty}"
+            if now - sent.get(key, 0) < REINFORCE_COOLDOWN_S:
+                continue
+            for v in villages:
+                c = self.coords.get(v["id"])
+                if not c or tuple(c) == (tx, ty) or v["state"]["incoming"]["attacks"]:
+                    continue  # unknown position, the target itself, or under attack itself
+                if math.hypot(c[0] - tx, c[1] - ty) > d["reinforce_radius"] \
+                        or not rules.find_slot(v["state"], "Rally Point"):
+                    continue
+                count = int((v["state"]["troops"].get(unit, 0) - d["reinforce_keep"]) * d["reinforce_share"])
+                if count < 1:
+                    continue
+                self.vname = v["name"]
+                log.info("[%s] %sreinforce %s (%s|%s) with %d %s: attack incoming", v["name"],
+                         "[dry-run] " if self.dry_run else "", t["name"], tx, ty, count, units.name(unit))
+                ok = True
+                if not self.dry_run:
+                    if v["id"] is not None:
+                        self.client.select_village(v["id"])
+                    ok = self.client.send_reinforcement(tx, ty, 1, count, unit)
+                if not ok:
+                    log.info("[%s] the game refused the reinforcement to %s", v["name"], t["name"])
+                    continue
+                sent[key] = now
+                actions.append({"action": "reinforce", "name": f"{count} {units.name(unit)} to {t['name']}",
+                                "slot": 39, "reason": "attack incoming", "village": v["name"], "time": int(now)})
+        if not self.dry_run:
+            write_json(path, {k: ts for k, ts in sent.items() if now - ts < 24 * 3600})
         return actions
 
     def village_tick(self, vid, state, plan, village_count):
@@ -221,7 +323,7 @@ class Bot:
             self.coords[vid] = self.client.coordinates()
         if not self.dry_run:
             note = self.expansion.step(self.client, vid, self.coords.get(vid), state, plan,
-                                       self.tribe, village_count, reserved)
+                                       self.tribe, village_count, reserved, self._ally_tiles())
             if note:
                 log.info("[%s] %s", self.vname, note)
                 state = self.client.village()
@@ -265,6 +367,17 @@ class Bot:
             except (requests.RequestException, GameError):
                 pass
             self.capital_checked = time.time()
+        try:
+            self.allies = ally_status(self.state_dir)
+        except OSError as e:
+            log.warning("could not read the allied bots' status: %s", e)
+            self.allies = []
+        for v in villages:  # a single village has no coordinates in the village list: ask the map once
+            if v["x"] is None and self.coords.get(v["id"]) is None:
+                try:
+                    self.coords[v["id"]] = self.client.coordinates()
+                except (requests.RequestException, GameError, ValueError):
+                    pass
         out, all_actions, soon, seen = [], [], [], []
         for v in villages:
             self.vname = v["name"]
@@ -296,6 +409,10 @@ class Bot:
             all_actions += self.share(seen, plan)
         except (requests.RequestException, GameError, ValueError, KeyError) as e:
             log.warning("resource sharing failed: %s", e)
+        try:
+            all_actions += self.reinforce(seen, plan)
+        except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+            log.warning("reinforcement failed: %s", e)
         if self.diplomacy:
             try:
                 msg = self.diplomacy.step(self.client, seen, self.dry_run)

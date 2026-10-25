@@ -45,6 +45,14 @@ DEFAULT_PLAN = {
         "budget_share": 0.25,
         # share it may spend while an attack is incoming
         "emergency_share": 0.8,
+        # send defenders to own/allied villages with incoming attacks (reinforcement, never attack)
+        "reinforce": True,
+        # defenders that always stay home in the sending village
+        "reinforce_keep": 20,
+        # share of the defenders above reinforce_keep that may go, per attacked village
+        "reinforce_share": 0.5,
+        # only villages within this many tiles of the attacked one send help
+        "reinforce_radius": 15,
     },
     "expansion": {
         "enabled": True,
@@ -53,6 +61,8 @@ DEFAULT_PLAN = {
         "search_radius": 8,
         # prefer valleys with at least this many croplands (6 = normal 4-4-4-6)
         "min_crop_fields": 6,
+        # skip valleys within this many tiles of an allied bot's village or settling target
+        "ally_buffer": 3,
     },
     "gold": {
         # spend village gold on "Finish now" (50 gold per running job)
@@ -75,6 +85,10 @@ DEFAULT_PLAN = {
         "fill_to": 0.85,
         # don't bother with smaller shipments
         "min_shipment": 1000,
+        # also ship to young villages of the allied bots (same alliance)
+        "allies": True,
+        # for shipments to allies the donor keeps at least this share of its storage
+        "ally_keep_share": 0.3,
     },
 }
 
@@ -119,8 +133,11 @@ def validate(raw):
 
     defense = raw.get("defense")
     if isinstance(defense, dict):
+        if isinstance(defense.get("reinforce"), bool):
+            plan["defense"]["reinforce"] = defense["reinforce"]
         for key, lo, hi, cast in (("unit_target", 0, 1000, int), ("budget_share", 0, 0.9, float),
-                                  ("emergency_share", 0, 1, float)):
+                                  ("emergency_share", 0, 1, float), ("reinforce_keep", 0, 1000, int),
+                                  ("reinforce_share", 0, 1, float), ("reinforce_radius", 1, 50, int)):
             v = _num(defense, key, lo, hi, cast)
             if v is not None:
                 plan["defense"][key] = v
@@ -129,7 +146,8 @@ def validate(raw):
     if isinstance(expansion, dict):
         if isinstance(expansion.get("enabled"), bool):
             plan["expansion"]["enabled"] = expansion["enabled"]
-        for key, lo, hi in (("max_villages", 1, 20), ("search_radius", 2, 15), ("min_crop_fields", 1, 15)):
+        for key, lo, hi in (("max_villages", 1, 20), ("search_radius", 2, 15), ("min_crop_fields", 1, 15),
+                             ("ally_buffer", 0, 10)):
             v = _num(expansion, key, lo, hi, int)
             if v is not None:
                 plan["expansion"][key] = v
@@ -146,10 +164,12 @@ def validate(raw):
 
     share = raw.get("share")
     if isinstance(share, dict):
-        if isinstance(share.get("enabled"), bool):
-            plan["share"]["enabled"] = share["enabled"]
+        for key in ("enabled", "allies"):
+            if isinstance(share.get(key), bool):
+                plan["share"][key] = share[key]
         for key, lo, hi, cast in (("young_ratio", 0, 1, float), ("donor_keep_share", 0, 0.95, float),
-                                  ("fill_to", 0.1, 1, float), ("min_shipment", 0, 100000, int)):
+                                  ("fill_to", 0.1, 1, float), ("min_shipment", 0, 100000, int),
+                                  ("ally_keep_share", 0, 0.95, float)):
             v = _num(share, key, lo, hi, cast)
             if v is not None:
                 plan["share"][key] = v

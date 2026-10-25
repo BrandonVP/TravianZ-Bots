@@ -133,6 +133,19 @@ class GameClient:
         self.post("build.php", confirm)
         return True
 
+    def send_reinforcement(self, x, y, unit_index, count, unit_id):
+        """Send `count` troops of the tribe's unit number `unit_index` (1-10) from the current village to
+        reinforce (x|y), via the Rally Point form (c=2) and its confirmation. True if the troops left."""
+        data = {"b": 1, "c": 2, "x": x, "y": y, "dname": "", "disabledr": "", "disabled": "",
+                f"t{unit_index}": int(count), "s1": "ok"}
+        confirm = parse.parse_a2b_confirm(self.post("a2b.php", data))
+        if confirm is None:
+            return False
+        before = parse.parse_troops(parse._soup(self.get("dorf1.php"))).get(unit_id, 0)
+        self.post("a2b.php", confirm)
+        after = parse.parse_troops(parse._soup(self.get("dorf1.php"))).get(unit_id, 0)
+        return after < before
+
     def coordinates(self):
         """(x, y) of the current village (the map opens centred on it)."""
         return parse.parse_map_center(self.get("karte.php"))
