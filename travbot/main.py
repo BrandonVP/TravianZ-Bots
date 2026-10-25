@@ -27,6 +27,7 @@ import time
 
 import requests
 
+from .names import display
 from . import plan as planmod
 from . import rules, units, web
 from .advisor import Advisor
@@ -115,11 +116,12 @@ class Bot:
         self.capital_checked = 0.0
 
     def _act(self, cand, href, actions, label):
-        log.info("[%s] %s%s %s (slot %d): %s", self.vname, label, cand["action"], cand["name"],
-                 cand["slot"], cand["reason"])
+        from .names import display, display_text
+        log.info("[%s] %s%s %s (slot %d): %s", self.vname, label, cand["action"], display(cand["name"]),
+                 cand["slot"], display_text(cand["reason"]))
         if not self.dry_run:
             self.client.follow(href)
-        actions.append({**cand, "time": int(time.time())})
+        actions.append({**cand, "name": display(cand["name"]), "reason": display_text(cand["reason"]), "time": int(time.time())})
 
     def _inspect(self, cand):
         if cand["action"] == "upgrade":
@@ -179,11 +181,11 @@ class Bot:
         done = False
         for job in rules.finish_choices(state["queue"], state.get("gold"), reserve, g):
             log.info("[%s] %sfinish %s -> level %s now for %s gold (%d min left, gold %d, keeping %d)",
-                     self.vname, "[dry-run] " if self.dry_run else "", job["name"], job["to_level"],
+                     self.vname, "[dry-run] " if self.dry_run else "", display(job["name"]), job["to_level"],
                      job.get("finish_price") or 50, job["seconds_left"] // 60, state["gold"]["amount"], reserve)
             if not self.dry_run:
                 self.client.finish_job(job["finish_href"])
-            actions.append({"action": "finish", "name": job["name"], "slot": job["slot"],
+            actions.append({"action": "finish", "name": display(job["name"]), "slot": job["slot"],
                             "reason": f"{job['seconds_left'] // 60} min left, {job.get('finish_price') or 50} gold",
                             "time": int(time.time())})
             done = True

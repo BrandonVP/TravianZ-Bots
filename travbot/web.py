@@ -117,7 +117,8 @@ def render(state_dir, name="AIBot", nav=""):
             f'<td>{e(a.get("village", ""))}</td><td>{e(a["action"])} {e(a["name"])}'
             f'{" x" + str(a["count"]) if a.get("count") else ""}</td><td class="muted">{e(a.get("reason", ""))}</td></tr>'
             for a in reversed(status["recent_actions"][-20:])) or '<tr><td class="muted">none yet</td></tr>'
-        targets = ", ".join(f'{e(t["name"])} {t["level"]}' for t in plan.get("building_targets", [])) or "default"
+        from .names import display
+        targets = ", ".join(f'{e(display(t["name"]))} {t["level"]}' for t in plan.get("building_targets", [])) or "default"
         exp = status.get("expansion") or {}
         exp_html = "".join(f'<li>village {e(str(k))}: scanned radius {x["radius"]}, '
                            f'{x["valleys_found"]} free valleys{", settlers sent" if x.get("sent") else ""}</li>'

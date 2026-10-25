@@ -3,6 +3,8 @@ import re
 
 from bs4 import BeautifulSoup
 
+from .names import canon
+
 RESOURCES = ("wood", "clay", "iron", "crop")
 
 # Resource-bar cell ids in res.tpl: l4=wood, l3=clay, l2=iron, l1=crop.
@@ -89,7 +91,7 @@ def parse_queue(soup):
         price = _FINISH_PRICE.search(finish.get("onclick", "") or finish.get("title", "")) if finish else None
         queue.append({
             "slot": int(_SLOT_ID.search(link["href"]).group(1)),
-            "name": link.get_text(strip=True),
+            "name": canon(link.get_text(strip=True)),
             "to_level": int(level.group(1)) if level else None,
             "seconds_left": duration_seconds(timer.get_text()) or 0,
             "finish_href": finish["href"].replace("&amp;", "&") if finish else None,
@@ -176,9 +178,9 @@ def parse_dorf1(html):
         if slot not in FIELD_SLOTS:
             continue
         m = _LEVEL_TITLE.match(title)
-        if not m or m.group(1) not in FIELD_KIND:
+        if not m or canon(m.group(1)) not in FIELD_KIND:
             continue
-        fields.append({"slot": slot, "kind": FIELD_KIND[m.group(1)], "level": int(m.group(2))})
+        fields.append({"slot": slot, "kind": FIELD_KIND[canon(m.group(1))], "level": int(m.group(2))})
     return {"resources": parse_resources(soup), "fields": fields, "queue": parse_queue(soup),
             "troops": parse_troops(soup), "incoming": parse_incoming(soup),
             "villages": parse_villages(soup), "gold": parse_gold(soup)}
@@ -192,7 +194,7 @@ def parse_dorf2(html):
         if not 19 <= slot <= 44:   # 41-44: the four extra building slots
             continue
         m = _LEVEL_TITLE.match(title)
-        buildings[slot] = {"name": m.group(1), "level": int(m.group(2))} if m else None
+        buildings[slot] = {"name": canon(m.group(1)), "level": int(m.group(2))} if m else None
     return {"buildings": buildings, "queue": parse_queue(soup)}
 
 
@@ -226,7 +228,7 @@ def parse_construct_page(html):
     soup = _soup(html)
     options = {}
     for h2 in soup.find_all("h2"):
-        name = h2.get_text(strip=True)
+        name = canon(h2.get_text(strip=True))
         entry = {"href": None, "cost": None}
         for el in h2.find_all_next():
             if el.name == "h2":

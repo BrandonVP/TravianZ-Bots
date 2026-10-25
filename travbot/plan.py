@@ -123,7 +123,8 @@ def validate(raw):
 
     targets = raw.get("building_targets")
     if isinstance(targets, list):
-        clean = [{"name": t["name"].strip(), "level": int(t["level"])}
+        from .names import canon  # the advisor answers with the game's current names
+        clean = [{"name": canon(t["name"]), "level": int(t["level"])}
                  for t in targets
                  if isinstance(t, dict) and isinstance(t.get("name"), str) and t["name"].strip()
                  and isinstance(t.get("level"), int) and not isinstance(t.get("level"), bool)

@@ -10,6 +10,7 @@ import time
 import requests
 
 from . import plan as planmod
+from .names import display, display_text
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ PLAN_SCHEMA = {
             "type": "array",
             "items": {
                 "type": "object",
-                "properties": {"name": {"type": "string", "enum": BUILDING_NAMES},
+                "properties": {"name": {"type": "string", "enum": [display(n) for n in BUILDING_NAMES]},
                                "level": {"type": "integer"}},
                 "required": ["name", "level"],
             },
@@ -236,7 +237,7 @@ class Advisor:
             "format": PLAN_SCHEMA,
             "keep_alive": 0,  # unload right after answering: give the GPU straight back
             "options": {"temperature": 0.3, "num_ctx": 8192},
-            "messages": [{"role": "system", "content": system_prompt(self.tribe)},
+            "messages": [{"role": "system", "content": display_text(system_prompt(self.tribe))},
                          {"role": "user", "content": _summary(status, current_plan)}],
         })
         r.raise_for_status()
