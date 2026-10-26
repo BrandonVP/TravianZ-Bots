@@ -20,10 +20,34 @@ _PLURALS = {
     "Clubman": "Clubmen", "Spearman": "Spearmen", "Axeman": "Axemen",
     "Phalanx": "Phalanxes", "Swordsman": "Swordsmen", "Gallic Horseman": "Gallic Horsemen",
     "Mounted Druid": "Mounted Druids", "Noble Cavalry": "Noble Cavalry",
+    "Funditor": "Funditores", "Bowman": "Bowmen", "Hunter": "Hunters",
 }
 
 
+# Archery Range units (game: GameEngine/UnitRegistry.php, U201..U282 in en.php):
+# id 200 + (tribe-1)*10 + k; k=1 the archer (no research), k=2 the skirmisher
+# (Academy research, high defence against ranged - the bots' archer counter)
+_EXTRA = {
+    201: "Sagittarius", 202: "Funditor", 211: "Bowman", 212: "Javelin Thrower",
+    221: "Archer", 222: "Slinger", 251: "Foot Archer", 252: "Steppe Javelineer",
+    261: "Nubian Archer", 262: "Chariot Archer", 271: "Cretan Archer", 272: "Peltast",
+    281: "Hunter", 282: "Axe Thrower",
+}
+
+
+def skirmisher(tribe):
+    """The tribe's second Archery Range unit (e.g. Gauls -> 222 Slinger)."""
+    return 200 + (tribe - 1) * 10 + 2
+
+
+def extra_slot(unit_id):
+    """Rally Point form field number of an Archery Range unit (t12, t13 ...)."""
+    return 11 + (unit_id - 200) % 10
+
+
 def name(unit_id):
+    if unit_id in _EXTRA:
+        return _EXTRA[unit_id]
     tribe, idx = divmod(unit_id - 1, 10)
     names = _NAMES.get(tribe + 1)
     return names[idx] if names else f"unit {unit_id}"

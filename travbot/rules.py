@@ -7,6 +7,8 @@ upgrade link when the queue has room and resources suffice).
 WALLS = ("City Wall", "Earth Wall", "Palisade")
 RALLY_SLOT, WALL_SLOT = 39, 40
 INNER_SLOTS = list(range(19, 39)) + list(range(41, 45))   # 41-44: extra building slots
+# servers with archers: the skirmisher needs Academy 5 + Archery Range 5 (Barracks 3 for the Range)
+ARCHERY_TARGETS = (("Barracks", 3), ("Academy", 5), ("Archery Range", 5))
 CANDIDATES_PER_CATEGORY = 3
 # Building targets can be blocked by requirements (the game offers no link), so look
 # further down the list before giving up on this tick.
@@ -93,6 +95,11 @@ def building_candidates(state, plan):
     for t in plan["building_targets"]:
         if by_name.get(t["name"], (None, 0))[1] < t["level"]:
             wanted.append((t["name"], f"target level {t['level']}"))
+    if plan.get("archers") and plan["defense"]["ranged_target"] > 0:
+        # after the plan's own targets: what the anti-archer skirmishers need
+        for name, level in ARCHERY_TARGETS:
+            if by_name.get(name, (None, 0))[1] < level:
+                wanted.append((name, f"archer defence needs {name} {level}"))
 
     out, seen = [], set()
     for name, reason in wanted:

@@ -114,6 +114,8 @@ class Bot:
         self.vname = ""   # village being handled, for log lines
         self.capital = None        # capital village id (keeps the bigger gold reserve)
         self.capital_checked = 0.0
+        self.archers = False       # server has the Archery Range units (checked hourly)
+        self.archers_checked = 0.0
 
     def _act(self, cand, href, actions, label):
         from .names import display, display_text
@@ -173,6 +175,48 @@ class Bot:
         actions.append({"action": "train", "name": units.name(unit), "count": count, "slot": slot,
                         "reason": "attack incoming" if under_attack else f"target {d['unit_target']}",
                         "time": int(time.time())})
+
+    def _defend_ranged(self, state, plan, reserved, actions):
+        """Servers with archers: research the tribe's skirmisher (anti-archer defence) in the Academy
+        and keep `defense.ranged_target` of them, trained at the Archery Range."""
+        d = plan["defense"]
+        if not plan.get("archers") or d["ranged_target"] <= 0:
+            return
+        slot = rules.find_slot(state, "Archery Range")
+        if slot is None:
+            return
+        unit = units.skirmisher(self.tribe)
+        page = self.client.train_page(slot)
+        info = page["units"].get(unit)
+        if info is None:
+            # not researched yet: start it when the Academy offers it (Academy 5 + Archery Range 5)
+            academy = rules.find_slot(state, "Academy")
+            if academy is None or rules.building_level(state, "Academy") < 5                     or rules.building_level(state, "Archery Range") < 5:
+                return
+            href = self.client.research_link(academy, unit)
+            if not href:
+                return
+            log.info("[%s] %sresearch %s in the Academy (slot %d)", self.vname,
+                     "[dry-run] " if self.dry_run else "", units.name(unit), academy)
+            if not self.dry_run:
+                self.client.follow(href)
+            actions.append({"action": "research", "name": units.name(unit), "slot": academy,
+                            "reason": "archer defence", "time": int(time.time())})
+            return
+        count = rules.troop_order(info["cost"], state["troops"].get(unit, 0), page["training"].get(unit, 0),
+                                  d["ranged_target"], state["resources"], d["budget_share"])
+        count = min(count, info["max"])
+        if count <= 0:
+            return
+        spend = {k: c * count for k, c in info["cost"].items()}
+        if reserved and rules.delays_reserved(reserved["cost"], state["resources"], spend):
+            return
+        log.info("[%s] %strain %d %s at the Archery Range (slot %d)", self.vname,
+                 "[dry-run] " if self.dry_run else "", count, units.name(unit), slot)
+        if not self.dry_run:
+            self.client.train(slot, unit, count)
+        actions.append({"action": "train", "name": units.name(unit), "count": count, "slot": slot,
+                        "reason": f"target {d['ranged_target']}", "time": int(time.time())})
 
     def _spend_gold(self, vid, state, plan, actions):
         """Finish long-running jobs with spare village gold. Returns True if something was finished."""
@@ -271,6 +315,7 @@ class Bot:
         except (OSError, ValueError):
             sent = {}
         unit = rules.basic_defender(self.tribe)
+        skirm = units.skirmisher(self.tribe) if plan.get("archers") else None
         now, actions = time.time(), []
         for t in targets:
             tx, ty = t["coords"]
@@ -284,22 +329,30 @@ class Bot:
                 if math.hypot(c[0] - tx, c[1] - ty) > d["reinforce_radius"] \
                         or not rules.find_slot(v["state"], "Rally Point"):
                     continue
-                count = int((v["state"]["troops"].get(unit, 0) - d["reinforce_keep"]) * d["reinforce_share"])
-                if count < 1:
+                count = max(0, int((v["state"]["troops"].get(unit, 0) - d["reinforce_keep"]) * d["reinforce_share"]))
+                # skirmishers go along: half of those above half the village's target
+                extra = {}
+                if skirm:
+                    n = int((v["state"]["troops"].get(skirm, 0) - d["ranged_target"] // 2) * d["reinforce_share"])
+                    if n >= 1:
+                        extra[units.extra_slot(skirm)] = n
+                if count < 1 and not extra:
                     continue
+                what = ", ".join([f"{count} {units.name(unit)}"] * (count > 0)
+                                 + [f"{n} {units.name(skirm)}" for n in extra.values()])
                 self.vname = v["name"]
-                log.info("[%s] %sreinforce %s (%s|%s) with %d %s: attack incoming", v["name"],
-                         "[dry-run] " if self.dry_run else "", t["name"], tx, ty, count, units.name(unit))
+                log.info("[%s] %sreinforce %s (%s|%s) with %s: attack incoming", v["name"],
+                         "[dry-run] " if self.dry_run else "", t["name"], tx, ty, what)
                 ok = True
                 if not self.dry_run:
                     if v["id"] is not None:
                         self.client.select_village(v["id"])
-                    ok = self.client.send_reinforcement(tx, ty, 1, count, unit)
+                    ok = self.client.send_reinforcement(tx, ty, 1, count, unit if count > 0 else skirm, extra)
                 if not ok:
                     log.info("[%s] the game refused the reinforcement to %s", v["name"], t["name"])
                     continue
                 sent[key] = now
-                actions.append({"action": "reinforce", "name": f"{count} {units.name(unit)} to {t['name']}",
+                actions.append({"action": "reinforce", "name": f"{what} to {t['name']}",
                                 "slot": 39, "reason": "attack incoming", "village": v["name"], "time": int(now)})
         if not self.dry_run:
             write_json(path, {k: ts for k, ts in sent.items() if now - ts < 24 * 3600})
@@ -357,6 +410,10 @@ class Bot:
 
         if not state["incoming"]["attacks"]:
             self._defend(state, plan, reserved, actions)
+            try:
+                self._defend_ranged(state, plan, reserved, actions)
+            except (requests.RequestException, GameError, ValueError, KeyError) as e:
+                log.warning("[%s] archer defence failed: %s", self.vname, e)
         return state, actions, waits, reserved, note
 
     def tick(self, plan):
@@ -369,6 +426,13 @@ class Bot:
             except (requests.RequestException, GameError):
                 pass
             self.capital_checked = time.time()
+        if time.time() - self.archers_checked > 3600:
+            try:
+                self.archers = self.client.archers_enabled()
+            except (requests.RequestException, GameError):
+                pass
+            self.archers_checked = time.time()
+        plan = {**plan, "archers": self.archers}
         try:
             self.allies = ally_status(self.state_dir)
         except OSError as e:

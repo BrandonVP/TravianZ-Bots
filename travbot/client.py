@@ -133,11 +133,14 @@ class GameClient:
         self.post("build.php", confirm)
         return True
 
-    def send_reinforcement(self, x, y, unit_index, count, unit_id):
+    def send_reinforcement(self, x, y, unit_index, count, unit_id, extra=None):
         """Send `count` troops of the tribe's unit number `unit_index` (1-10) from the current village to
-        reinforce (x|y), via the Rally Point form (c=2) and its confirmation. True if the troops left."""
+        reinforce (x|y), via the Rally Point form (c=2) and its confirmation. True if the troops left.
+        `extra` adds more form slots to the same send, e.g. {13: 5} for Archery Range units."""
         data = {"b": 1, "c": 2, "x": x, "y": y, "dname": "", "disabledr": "", "disabled": "",
                 f"t{unit_index}": int(count), "s1": "ok"}
+        for idx, n in (extra or {}).items():
+            data[f"t{idx}"] = int(n)
         confirm = parse.parse_a2b_confirm(self.post("a2b.php", data))
         if confirm is None:
             return False
@@ -149,6 +152,16 @@ class GameClient:
     def coordinates(self):
         """(x, y) of the current village (the map opens centred on it)."""
         return parse.parse_map_center(self.get("karte.php"))
+
+    # --- archers (Empires of Rome Archery Range) -------------------------------
+
+    def archers_enabled(self):
+        """True if this server has the Archery Range units (the manual lists the building only then)."""
+        return "gid=52" in self.get("manual.php?typ=3&s=2")
+
+    def research_link(self, academy_slot, unit_id):
+        """Academy research link for `unit_id` if the game offers it right now, else None."""
+        return parse.parse_research_link(self.get(f"build.php?id={academy_slot}"), unit_id)
 
     # --- building -------------------------------------------------------------
 

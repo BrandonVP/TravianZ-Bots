@@ -53,6 +53,10 @@ DEFAULT_PLAN = {
         "reinforce_share": 0.5,
         # only villages within this many tiles of the attacked one send help
         "reinforce_radius": 15,
+        # Archery Range skirmishers (anti-archer defence) to keep in each village. Only on
+        # servers with archers: then the bot also aims for Barracks 3, Academy 5 and an
+        # Archery Range 5, researches the skirmisher and sends them along when reinforcing.
+        "ranged_target": 15,
     },
     "expansion": {
         "enabled": True,
@@ -138,7 +142,8 @@ def validate(raw):
             plan["defense"]["reinforce"] = defense["reinforce"]
         for key, lo, hi, cast in (("unit_target", 0, 1000, int), ("budget_share", 0, 0.9, float),
                                   ("emergency_share", 0, 1, float), ("reinforce_keep", 0, 1000, int),
-                                  ("reinforce_share", 0, 1, float), ("reinforce_radius", 1, 50, int)):
+                                  ("reinforce_share", 0, 1, float), ("reinforce_radius", 1, 50, int),
+                                  ("ranged_target", 0, 1000, int)):
             v = _num(defense, key, lo, hi, cast)
             if v is not None:
                 plan["defense"][key] = v

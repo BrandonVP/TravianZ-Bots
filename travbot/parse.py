@@ -284,6 +284,15 @@ def parse_train_page(html):
     return out
 
 
+def parse_research_link(html, unit_id):
+    """Academy page: the research link for `unit_id` (offered only when it can start now), or None."""
+    for a in _soup(html).find_all("a", class_="research"):
+        href = (a.get("href") or "").replace("&amp;", "&")
+        if re.search(r"[?&]a=%d(?:&|$)" % unit_id, href):
+            return href
+    return None
+
+
 def parse_map_center(html):
     """(x, y) the map page is centred on (the current village when opened without params)."""
     soup = _soup(html)

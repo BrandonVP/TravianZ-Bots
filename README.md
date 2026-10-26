@@ -42,6 +42,10 @@ Status page: **http://192.168.68.205:8090/** (refreshes every minute; also `/sta
 5. **Fields:** cropland first if net crop < `min_net_crop`, else the resource with the lowest weighted production.
 6. **Buildings:** Warehouse/Granary when storage fills within `storage_buffer_hours`, then `building_targets` in order.
 7. **Defence:** keep `defense.unit_target` Phalanxes, spending at most `defense.budget_share` per round.
+8. **Archer defence** (only on servers with the Archery Range units; checked hourly via the manual): aim for
+   Barracks 3, Academy 5 and Archery Range 5 after the plan's own targets, research the tribe's skirmisher
+   (Funditor / Javelin Thrower / Slinger: high defence against ranged attacks) and keep `defense.ranged_target`
+   of them. Reinforcements take along a share of the skirmishers above half that target.
 
 After all villages: **resource sharing** (`share`). A village producing less than `share.young_ratio` of the
 richest one is "young"; the richest villages with a Marketplace ship it resources (Marketplace send form) up to
