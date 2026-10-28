@@ -69,10 +69,12 @@ DEFAULT_PLAN = {
         "ally_buffer": 3,
     },
     "gold": {
-        # spend village gold on "Finish now" (50 gold per running job)
+        # spend village gold on "Finish now" (priced by time left: 25 for 1 h, 100 for 8 h, 700 for 7 days)
         "finish_now": True,
-        # only jobs with at least this much time left (when gold is nearly full: 5 min)
-        "min_minutes_left": 30,
+        # never pay more than this for one job
+        "max_finish_price": 120,
+        # only finish a job that saves at least this many minutes per gold (good value: ~4.5-11 h left)
+        "min_minutes_per_gold": 4,
         # gold every village keeps; the capital keeps more for the weekly Plus/bonus renewals
         "reserve": 200,
         "capital_reserve": 6000,
@@ -162,7 +164,8 @@ def validate(raw):
     if isinstance(gold, dict):
         if isinstance(gold.get("finish_now"), bool):
             plan["gold"]["finish_now"] = gold["finish_now"]
-        for key, lo, hi, cast in (("min_minutes_left", 0, 24 * 60, int), ("reserve", 0, 100000, int),
+        for key, lo, hi, cast in (("max_finish_price", 10, 1000, int), ("min_minutes_per_gold", 0, 60, float),
+                                  ("reserve", 0, 100000, int),
                                   ("capital_reserve", 0, 100000, int), ("max_per_tick", 0, 10, int)):
             v = _num(gold, key, lo, hi, cast)
             if v is not None:

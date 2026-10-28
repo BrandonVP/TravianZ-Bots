@@ -124,24 +124,37 @@ def total_production(state):
 
 
 def finish_choices(queue, gold, reserve, gold_plan):
-    """Running jobs worth finishing with gold: longest first, while gold stays above `reserve`.
+    """Running jobs worth finishing with gold, best value first, while gold stays above `reserve`.
 
-    When the village gold is nearly full (it would be wasted), shorter jobs qualify too.
+    Finish now is priced by the time left (10 gold for minutes ... 700 for a week), so the bot only
+    buys time where it is cheap: a job must save at least `min_minutes_per_gold` minutes per gold and
+    cost at most `max_finish_price`. With the game's curve that is roughly 4.5 to 11 hours left.
+    When the village's gold is nearly full (it would be wasted at the cap) the price limit doubles and
+    the value bar halves.
     """
     if not gold_plan["finish_now"] or not gold:
         return []
-    min_left = gold_plan["min_minutes_left"] * 60
+    max_price = gold_plan["max_finish_price"]
+    min_value = gold_plan["min_minutes_per_gold"]
     if gold["cap"] and gold["amount"] >= 0.9 * gold["cap"]:
-        min_left = min(min_left, 5 * 60)
-    jobs = sorted((j for j in queue if j.get("finish_href") and j.get("seconds_left", 0) >= min_left),
-                  key=lambda j: -j["seconds_left"])
+        max_price, min_value = max_price * 2, min_value / 2
+    jobs = []
+    for j in queue:
+        price = j.get("finish_price")
+        if not j.get("finish_href") or not price or price > max_price:
+            continue
+        value = j.get("seconds_left", 0) / 60 / price   # minutes saved per gold
+        if value >= min_value:
+            jobs.append((value, j))
+    jobs.sort(key=lambda vj: -vj[0])
     out, left = [], gold["amount"]
-    for j in jobs[:gold_plan["max_per_tick"]]:
-        price = j.get("finish_price") or 50
-        if left - price < reserve:
+    for _, j in jobs:
+        if len(out) >= gold_plan["max_per_tick"]:
             break
+        if left - j["finish_price"] < reserve:
+            continue   # too dear for what is left: a cheaper one may still fit
         out.append(j)
-        left -= price
+        left -= j["finish_price"]
     return out
 
 

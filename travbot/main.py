@@ -219,18 +219,18 @@ class Bot:
                         "reason": f"target {d['ranged_target']}", "time": int(time.time())})
 
     def _spend_gold(self, vid, state, plan, actions):
-        """Finish long-running jobs with spare village gold. Returns True if something was finished."""
+        """Finish good-value running jobs with spare village gold. Returns True if something was finished."""
         g = plan["gold"]
         reserve = g["capital_reserve"] if vid is not None and vid == self.capital else g["reserve"]
         done = False
         for job in rules.finish_choices(state["queue"], state.get("gold"), reserve, g):
             log.info("[%s] %sfinish %s -> level %s now for %s gold (%d min left, gold %d, keeping %d)",
                      self.vname, "[dry-run] " if self.dry_run else "", display(job["name"]), job["to_level"],
-                     job.get("finish_price") or 50, job["seconds_left"] // 60, state["gold"]["amount"], reserve)
+                     job["finish_price"], job["seconds_left"] // 60, state["gold"]["amount"], reserve)
             if not self.dry_run:
                 self.client.finish_job(job["finish_href"])
             actions.append({"action": "finish", "name": display(job["name"]), "slot": job["slot"],
-                            "reason": f"{job['seconds_left'] // 60} min left, {job.get('finish_price') or 50} gold",
+                            "reason": f"{job['seconds_left'] // 60} min left, {job['finish_price']} gold",
                             "time": int(time.time())})
             done = True
         return done

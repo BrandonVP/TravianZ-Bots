@@ -35,10 +35,12 @@ Status page: **http://192.168.68.205:8090/** (refreshes every minute; also `/sta
 3. **Expansion** (Residence 10, `expansion.enabled`, fewer than `max_villages`): scan 12 map tiles per round
    for free valleys, keep 3 settlers trained, then send them to the nearest valley with at least
    `min_crop_fields` croplands. The game checks culture points, resources and the Rally Point.
-4. **Gold:** finish running build jobs with "Finish now" (50 village gold each), longest first, only jobs with at
-   least `gold.min_minutes_left` left (5 min when the village's gold is nearly full), at most `gold.max_per_tick`.
-   Every village keeps `gold.reserve`; the capital keeps `gold.capital_reserve` because it pays the weekly
-   Plus/production-bonus auto-renewals (about 5,500 gold a week).
+4. **Gold:** finish running build jobs with "Finish now". The game prices it by the time left (10 gold for a few
+   minutes, 25 for 1 h, 100 for 8 h, 200 for a day, 700 for a week), so the bot only buys cheap time: a job must
+   save at least `gold.min_minutes_per_gold` minutes per gold (default 4) and cost at most `gold.max_finish_price`
+   (default 120), which is roughly jobs with 4.5 to 11 hours left. Best value first, at most `gold.max_per_tick`
+   per village per round, keeping `gold.reserve` (capital: `gold.capital_reserve`). When a village's gold is nearly
+   full the price limit doubles and the value bar halves, so gold is not wasted at the cap.
 5. **Fields:** cropland first if net crop < `min_net_crop`, else the resource with the lowest weighted production.
 6. **Buildings:** Warehouse/Granary when storage fills within `storage_buffer_hours`, then `building_targets` in order.
 7. **Defence:** keep `defense.unit_target` Phalanxes, spending at most `defense.budget_share` per round.

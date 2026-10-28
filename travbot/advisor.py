@@ -61,10 +61,12 @@ PLAN_SCHEMA = {
         },
         "gold": {
             "type": "object",
-            "properties": {"finish_now": {"type": "boolean"}, "min_minutes_left": {"type": "integer"},
+            "properties": {"finish_now": {"type": "boolean"}, "max_finish_price": {"type": "integer"},
+                           "min_minutes_per_gold": {"type": "number"},
                            "reserve": {"type": "integer"}, "capital_reserve": {"type": "integer"},
                            "max_per_tick": {"type": "integer"}},
-            "required": ["finish_now", "min_minutes_left", "reserve", "capital_reserve", "max_per_tick"],
+            "required": ["finish_now", "max_finish_price", "min_minutes_per_gold", "reserve", "capital_reserve",
+                         "max_per_tick"],
         },
         "share": {
             "type": "object",
@@ -105,8 +107,10 @@ You do not act directly. You write a plan that a rules engine follows until your
 - expansion: enabled (true/false); max_villages; search_radius (tiles, 2-15) for free valleys; min_crop_fields
   (6 = normal valley); ally_buffer (0-10): skip valleys this close to an allied bot's village or settling
   target. Founding needs Residence 10, 3 settlers (expensive), culture points and a Rally Point.
-- gold: finish_now (true/false) spends 50 village gold to finish a running build job at once, longest jobs first,
-  only jobs with at least min_minutes_left (when the village's gold is nearly full: 5 min); every village keeps
+- gold: finish_now (true/false) spends village gold to finish a running build job at once. The price depends on
+  the time left (10 gold for a few minutes, 25 for 1 h, 100 for 8 h, 200 for a day, 700 for a week), so only good
+  value is bought: at most max_finish_price (10-1000) per job and at least min_minutes_per_gold (0-60) minutes saved
+  per gold, best value first (gold nearly full: price limit x2, value bar /2); every village keeps
   `reserve` gold, the capital keeps `capital_reserve` (the capital pays the weekly Plus + production bonus
   renewals, about 5,500 gold a week); max_per_tick (0-10) finishes per village per round.
 - share: enabled (true/false); a village producing less than young_ratio (0-1) of the richest village is "young"
