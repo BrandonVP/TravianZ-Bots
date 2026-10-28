@@ -72,6 +72,21 @@ Then **raiding** (`raid`, `travbot/raid.py`, bookkeeping in `state*/raid.json`):
   `raid.block_days`, losing every raider blocks it for good.
 - Nothing is sent from a village under attack.
 
+Then the **champion** (`champion`, `travbot/champion.py`), every `champion.every_minutes` from the first village
+with a Champion's Hall. The game prints a JSON copy of the Champion's Hall pages (ids `tz-champ`, `tz-hero`,
+`tz-quests`, `tz-auc`), so the bot reads data, not page layout. Stats are valued by `champion.role`
+(attack / defence / economy); a set piece is worth more for every other piece of its set worn.
+1. **Stat points:** spent one by one on the stat with the best weight per point already in it (max 100 each).
+2. **Shop:** Common pieces for empty slots, keeping `champion.shop_min_gold` village gold.
+3. **Gear:** wear any piece in the bag that is worth more than the one in its slot (weapons of the champion's family only).
+4. **Spare gear** up to `champion.sell_max_rarity` (default Rare) that is worse than what is worn goes to the merchant.
+5. **Quest:** the longest offer whose worst health loss still leaves `champion.quest_health_margin`; none below
+   `champion.quest_min_health`; 6-8 h expeditions only from `champion.expedition_min_health`.
+6. **Auction House:** one bid per round on the best-value real upgrade (at least `champion.min_gain` weighted points),
+   maximum bid = gain x `champion.gold_per_point`, never above `champion.max_capital_share` of the capital's gold,
+   at most `champion.max_open_bids` at a time. The game holds the maximum from the capital until outbid.
+The champion is never trained by the bot; a bot without one skips all of this.
+
 The game has the final word: the bot only follows links and forms the game offers.
 
 ## Several bots

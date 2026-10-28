@@ -35,6 +35,7 @@ from .client import GameClient, GameError, tile_id
 from .diplomacy import Diplomacy, template_letter
 from .expand import Expansion
 from .raid import RaidBook, raider_choices, scout_unit, form_slot, dist as raid_dist
+from .champion import ChampionKeeper
 
 log = logging.getLogger("travbot")
 
@@ -119,6 +120,8 @@ class Bot:
         self.archers_checked = 0.0
         self.raid = RaidBook(state_dir)
         self.raiders = {}          # village id -> raider unit id the village can train (None: none yet)
+        self.champion = ChampionKeeper(client, dry_run)
+        self.champion_checked = 0.0
 
     def _act(self, cand, href, actions, label):
         from .names import display, display_text
@@ -360,6 +363,25 @@ class Bot:
         if not self.dry_run:
             write_json(path, {k: ts for k, ts in sent.items() if now - ts < 24 * 3600})
         return actions
+
+    def champion_tick(self, villages, plan):
+        """Every plan["champion"]["every_minutes"]: the champion's rules (travbot/champion.py), run from
+        the first village with a Champion's Hall."""
+        cfg = plan["champion"]
+        if not cfg["enabled"] or time.time() - self.champion_checked < cfg["every_minutes"] * 60:
+            return []
+        self.champion_checked = time.time()
+        for v in villages:
+            slot = next((int(s) for s, b in v["state"]["buildings"].items() if b and b["name"] == "Hero's Mansion"), None)
+            if slot is None:
+                continue
+            if v["id"] is not None:
+                self.client.select_village(v["id"])
+            self.vname = v["name"]
+            acts = self.champion.step(slot, cfg)
+            now = int(time.time())
+            return [{**a, "village": v["name"], "time": now} for a in acts]
+        return []
 
     def raids(self, villages, plan):
         """Raid safe targets (travbot/raid.py): learn from new reports, refresh the map once a day,
@@ -657,6 +679,10 @@ class Bot:
             all_actions += self.raids(seen, plan)
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
             log.warning("raiding failed: %s", e)
+        try:
+            all_actions += self.champion_tick(seen, plan)
+        except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+            log.warning("champion failed: %s", e)
         if self.diplomacy:
             try:
                 msg = self.diplomacy.step(self.client, seen, self.dry_run)

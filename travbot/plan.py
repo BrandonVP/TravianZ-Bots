@@ -100,6 +100,25 @@ DEFAULT_PLAN = {
         "scout_count": 2,
         "rescout_hours": 24,          # farms are scouted again, oases' animals re-checked, this often
     },
+    "champion": {
+        # the champion (travbot/champion.py): stat points, quests, best gear, shop, Auction House
+        "enabled": True,
+        "role": "economy",            # attack / defence / economy: which stats count most
+        "every_minutes": 30,
+        "quests": True,
+        "quest_min_health": 40,       # no quest below this health
+        "quest_health_margin": 10,    # the quest's worst health loss must leave this much
+        "expedition_min_health": 80,  # 6-8 h expeditions only from this health
+        "shop": True,
+        "shop_min_gold": 300,         # village gold kept when buying Common gear
+        "sell_spare": True,
+        "sell_max_rarity": 3,         # spare Common/Uncommon/Rare go to the merchant; Epic+ are kept
+        "auction": True,
+        "min_gain": 2.0,              # bid only on a real upgrade (weighted stat points)
+        "gold_per_point": 30,         # most gold a weighted stat point is worth (merchant Rare ~150-300)
+        "max_capital_share": 0.25,    # a bid never above this share of the capital's gold
+        "max_open_bids": 2,
+    },
     "share": {
         # rich villages ship surplus resources to young ones through the Marketplace
         "enabled": True,
@@ -207,6 +226,22 @@ def validate(raw):
         for key in ("farm_accounts", "exclude"):
             if isinstance(raid.get(key), list) and all(isinstance(n, str) for n in raid[key]):
                 plan["raid"][key] = raid[key][:50]
+
+    champ = raw.get("champion")
+    if isinstance(champ, dict):
+        for key in ("enabled", "quests", "shop", "sell_spare", "auction"):
+            if isinstance(champ.get(key), bool):
+                plan["champion"][key] = champ[key]
+        if champ.get("role") in ("attack", "defence", "economy"):
+            plan["champion"]["role"] = champ["role"]
+        for key, lo, hi, cast in (("every_minutes", 5, 1440, int), ("quest_min_health", 0, 100, float),
+                                  ("quest_health_margin", 0, 100, float), ("expedition_min_health", 0, 100, float),
+                                  ("shop_min_gold", 0, 100000, int), ("sell_max_rarity", 0, 5, int),
+                                  ("min_gain", 0, 100, float), ("gold_per_point", 0, 1000, float),
+                                  ("max_capital_share", 0, 1, float), ("max_open_bids", 0, 10, int)):
+            v = _num(champ, key, lo, hi, cast)
+            if v is not None:
+                plan["champion"][key] = v
 
     share = raw.get("share")
     if isinstance(share, dict):
