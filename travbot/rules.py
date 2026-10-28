@@ -227,7 +227,8 @@ def subtract(resources, cost):
     """Copy of resources with `cost` spent."""
     out = {k: dict(v) for k, v in resources.items()}
     for k, c in (cost or {}).items():
-        out[k]["amount"] -= c
+        if k in out:
+            out[k]["amount"] -= c
     return out
 
 
@@ -241,10 +242,22 @@ def delays_reserved(reserved_cost, resources, spend_cost, slack_s=SAVE_UP_SLACK_
     return after - before > slack_s
 
 
+def stock(state):
+    """The village's resources plus its gold ({"amount", "prod"}), for costs that include gold."""
+    res = dict(state["resources"])
+    g = state.get("gold")
+    if g:
+        res["gold"] = {"amount": g["amount"], "cap": g.get("cap"), "prod": g.get("prod", 0)}
+    return res
+
+
 def seconds_until_affordable(cost, resources):
-    """How long until `cost` is affordable at current production (inf if never)."""
+    """How long until `cost` is affordable at current production (inf if never).
+    A cost the stock doesn't track (gold with village gold off) is ignored."""
     worst = 0.0
     for k, need in cost.items():
+        if k not in resources:
+            continue
         short = need - resources[k]["amount"]
         if short <= 0:
             continue

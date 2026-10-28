@@ -83,7 +83,7 @@ class Expansion:
             need = SETTLERS_NEEDED - home - training
             if need <= 0 or unit is None or unit["max"] < 1:
                 return msg  # already training, or can't afford one yet (or no expansion slot)
-            if reserved and rules.delays_reserved(reserved["cost"], state["resources"], unit["cost"]):
+            if reserved and rules.delays_reserved(reserved["cost"], rules.stock(state), unit["cost"]):
                 return msg
             count = min(need, unit["max"])
             client.train(slot, settler, count)

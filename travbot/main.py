@@ -145,7 +145,7 @@ class Bot:
             info = self._inspect(cands[0])
             if info.get("href") or not info.get("cost"):
                 continue  # affordable now, or blocked for another reason
-            eta = rules.seconds_until_affordable(info["cost"], state["resources"])
+            eta = rules.seconds_until_affordable(info["cost"], rules.stock(state))
             if 0 < eta <= horizon and (best is None or eta < best["eta"]):
                 best = {"name": cands[0]["name"], "slot": cands[0]["slot"], "cost": info["cost"], "eta": eta}
         return best
@@ -169,7 +169,7 @@ class Bot:
         if count <= 0:
             return
         spend = {k: c * count for k, c in info["cost"].items()}
-        if reserved and not under_attack and rules.delays_reserved(reserved["cost"], state["resources"], spend):
+        if reserved and not under_attack and rules.delays_reserved(reserved["cost"], rules.stock(state), spend):
             return
         log.info("[%s] %strain %d %s in Barracks (slot %d)%s", self.vname, "[dry-run] " if self.dry_run else "",
                  count, units.name(unit), slot, " - ATTACK INCOMING" if under_attack else "")
@@ -212,7 +212,7 @@ class Bot:
         if count <= 0:
             return
         spend = {k: c * count for k, c in info["cost"].items()}
-        if reserved and rules.delays_reserved(reserved["cost"], state["resources"], spend):
+        if reserved and rules.delays_reserved(reserved["cost"], rules.stock(state), spend):
             return
         log.info("[%s] %strain %d %s at the Archery Range (slot %d)", self.vname,
                  "[dry-run] " if self.dry_run else "", count, units.name(unit), slot)
@@ -511,14 +511,14 @@ class Bot:
                     info = self._inspect(cand)
                     if info.get("href"):
                         if reserved and cand["slot"] != reserved["slot"] and info.get("cost") \
-                                and rules.delays_reserved(reserved["cost"], state["resources"], info["cost"]):
+                                and rules.delays_reserved(reserved["cost"], rules.stock(state), info["cost"]):
                             log.debug("skip %s: saving for %s", cand["name"], reserved["name"])
                             continue
                         self._act(cand, info["href"], actions, label)
                         placed = True
                         break
                     if info.get("cost"):
-                        waits.append(rules.seconds_until_affordable(info["cost"], state["resources"]))
+                        waits.append(rules.seconds_until_affordable(info["cost"], rules.stock(state)))
                     if "workers" in (info.get("status") or "").lower():
                         break  # this queue is full; cheaper candidates won't help
                 if not placed or self.dry_run:
@@ -559,7 +559,7 @@ class Bot:
         if count <= 0:
             return True
         spend = {k: c * count for k, c in info["cost"].items()}
-        if reserved and rules.delays_reserved(reserved["cost"], state["resources"], spend):
+        if reserved and rules.delays_reserved(reserved["cost"], rules.stock(state), spend):
             return True
         log.info("[%s] %strain %d %s (slot %d) for %s", self.vname, "[dry-run] " if self.dry_run else "",
                  count, units.name(unit), slot, why)

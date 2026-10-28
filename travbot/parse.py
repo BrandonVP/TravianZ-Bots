@@ -199,15 +199,20 @@ def parse_dorf2(html):
 
 
 def parse_build_page(html):
-    """build.php?id=N for an existing field/building: upgrade link (if allowed now) and cost."""
+    """build.php?id=N for an existing field/building: upgrade link (if allowed now) and cost.
+
+    Levels that also cost village gold (above level 10, the Treasury, storage 21-25) show a fifth
+    number after the four resources: it becomes cost["gold"]."""
     soup = _soup(html)
     contract = soup.find("p", id="contract")
     result = {"href": None, "cost": None, "duration": None, "status": None}
     if contract is None:
         return result
     nums = [int(s.get_text(strip=True)) for s in contract.find_all("span", class_="little_res")]
-    if len(nums) == 4:
-        result["cost"] = dict(zip(RESOURCES, nums))
+    if len(nums) in (4, 5):
+        result["cost"] = dict(zip(RESOURCES, nums[:4]))
+        if len(nums) == 5:
+            result["cost"]["gold"] = nums[4]
     m = re.search(r"\d+:\d{2}:\d{2}", contract.get_text(" ", strip=True))
     if m:
         result["duration"] = duration_seconds(m.group(0))
