@@ -456,3 +456,100 @@ def has_found_form(html):
     """True if a2b.php?id=..&s=1 shows the 'found new village' form (settlers ready, tile free)."""
     soup = _soup(html)
     return soup.find("input", attrs={"name": "a", "value": "new"}) is not None
+
+
+# --- raiding (travbot/raid.py) -------------------------------------------------
+
+def parse_map_block(text):
+    """ajax.php?f=k7 (17x17 map block, JSON) -> list of tiles:
+    {"x", "y", "wref", "oasis": bool, "village": name or None, "owner", "pop", "alliance", "tribe"}.
+    Unoccupied oases have no owner; occupied ones have owner and pop "-"."""
+    import json
+    out = []
+    for col in json.loads(text):
+        for t in col:
+            if len(t) < 5:
+                continue
+            m = re.search(r"d=(\d+)", str(t[4]))
+            tile = {"x": int(t[0]), "y": int(t[1]), "wref": int(m.group(1)) if m else None,
+                    "oasis": int(t[3] or 0) > 0, "village": None, "owner": None, "pop": None,
+                    "alliance": None, "tribe": None}
+            if len(t) >= 12:
+                pop = str(t[9]).strip()
+                tile.update(village=t[7] or None, owner=t[8] or None,
+                            pop=int(pop) if pop.isdigit() else None,
+                            alliance=t[10] or None, tribe=int(t[11]) if str(t[11]).isdigit() else None)
+            out.append(tile)
+    return out
+
+
+def parse_oasis_animals(html):
+    """karte.php tile view of an unoccupied oasis: number of animals in it (0 = empty), or None."""
+    table = _soup(html).find("table", id="troop_info")
+    if table is None:
+        return None
+    return sum((_ints(td.get_text()) or [0])[0] for td in table.select("td.val"))
+
+
+def parse_report_list(html):
+    """berichte.php: [{"id", "topic"}] of the reports on the page, newest first."""
+    out = []
+    for a in _soup(html).find_all("a", href=re.compile(r"berichte\.php\?id=\d+")):
+        out.append({"id": int(re.search(r"id=(\d+)", a["href"]).group(1)), "topic": a.get_text(" ", strip=True)})
+    return out
+
+
+def _report_rows(table):
+    """unit ids, troops row and casualties row of a report's attacker/defender table."""
+    ids = [int(_UNIT_CLASS.search(" ".join(img.get("class", []))).group(1))
+           for img in table.select("tbody.units img.unit") if _UNIT_CLASS.search(" ".join(img.get("class", [])))]
+    rows = {}
+    for tr in table.select("tbody.units tr"):
+        th = tr.find("th")
+        if th is None:
+            continue
+        cells = [td.get_text(strip=True) for td in tr.find_all("td")]
+        rows[th.get_text(strip=True).lower()] = cells
+    def row(*names):
+        for n in names:
+            for k, v in rows.items():
+                if k.startswith(n):
+                    return v
+        return []
+    return ids, row("troops"), row("casualties")
+
+
+def parse_report(html):
+    """One attack/raid/scout report (berichte.php?id=..), from the attacker's side:
+    {"target": wref or None, "sent": {uid: n}, "dead": {uid: n}, "loot": int, "carry": int,
+     "defenders": int or None (None = unknown, e.g. every attacker died)}."""
+    soup = _soup(html)
+    att = soup.find("table", id="attacker")
+    if att is None:
+        return None
+    ids, troops, dead = _report_rows(att)
+    num = lambda s: int(s) if s.isdigit() else 0
+    out = {"target": None, "sent": {}, "dead": {}, "loot": 0, "carry": 0, "defenders": 0}
+    for i, uid in enumerate(ids):
+        if i < len(troops) and num(troops[i]):
+            out["sent"][uid] = num(troops[i])
+        if i < len(dead) and num(dead[i]):
+            out["dead"][uid] = num(dead[i])
+    carry = soup.select_one("tbody.goods div.carry")
+    if carry is not None:
+        nums = _ints(carry.get_text())
+        if len(nums) >= 2:
+            out["loot"], out["carry"] = nums[0], nums[1]
+    unknown = False
+    for d in soup.find_all("table", class_="defender"):
+        head = d.find("thead")
+        link = head.find("a", href=re.compile(r"karte\.php\?d=\d+")) if head else None
+        if link is not None and out["target"] is None:
+            out["target"] = int(re.search(r"d=(\d+)", link["href"]).group(1))
+        _, dtroops, _ = _report_rows(d)
+        if any(c == "?" for c in dtroops):
+            unknown = True
+        out["defenders"] += sum(num(c) for c in dtroops)
+    if unknown:
+        out["defenders"] = None
+    return out

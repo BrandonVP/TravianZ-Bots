@@ -48,11 +48,29 @@ Status page: **http://192.168.68.205:8090/** (refreshes every minute; also `/sta
    Barracks 3, Academy 5 and Archery Range 5 after the plan's own targets, research the tribe's skirmisher
    (Funditor / Javelin Thrower / Slinger: high defence against ranged attacks) and keep `defense.ranged_target`
    of them. Reinforcements take along a share of the skirmishers above half that target.
+9. **Raiders** (`raid.enabled`, villages with a Rally Point): keep `raid.unit_target` raiders on top of the
+   defenders, the first the village can train of: Romans Eques / Princeps / Hastatus, Teutons Teutonic Knight /
+   Axeman / Clubman, Gauls Theutates Thunder / Swordsman (when that is also the defender, the defenders stay
+   home), plus 2 x `raid.scout_count` scouts.
 
 After all villages: **resource sharing** (`share`). A village producing less than `share.young_ratio` of the
 richest one is "young"; the richest villages with a Marketplace ship it resources (Marketplace send form) up to
 `share.fill_to` of its storage, never below `share.donor_keep_share` of their own storage, skipping shipments under
 `share.min_shipment` and donors whose merchants are already on the way to it.
+
+Then **raiding** (`raid`, `travbot/raid.py`, bookkeeping in `state*/raid.json`):
+- Targets within `raid.radius` tiles: inactive players (a village's population unchanged for
+  `raid.inactive_days`), unoccupied oases with no animals (checked on the tile), and the admin farm accounts
+  (`raid.farm_accounts`). Never the own alliance, the allied bots, `raid.exclude` (admins, Natars, Nature,
+  Brandon) or active players.
+- The map around each village is read once a day (4 blocks of 17x17 via `ajax.php?f=k7`).
+- Players' villages are scouted first (farms again every `raid.rescout_hours`); troops at home mark them
+  defended for `raid.block_days`.
+- At most `raid.max_out` missions per village; first wave `raid.first_wave`, then +50% after a full carry (up to
+  `raid.max_wave`) or fewer after a poor one; back after `raid.cooldown_hours` (longer after a poor haul).
+- Reports (`berichte.php`) of the bot's own raids are read every round: losses block the target for
+  `raid.block_days`, losing every raider blocks it for good.
+- Nothing is sent from a village under attack.
 
 The game has the final word: the bot only follows links and forms the game offers.
 

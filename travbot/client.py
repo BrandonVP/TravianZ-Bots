@@ -149,6 +149,42 @@ class GameClient:
         after = parse.parse_troops(parse._soup(self.get("dorf1.php"))).get(unit_id, 0)
         return after < before
 
+    def send_troops(self, x, y, c, slots, check_unit=None):
+        """Send troops from the current village to (x|y) with the Rally Point form: c=4 raid, c=3 attack
+        (only scouts -> the game makes it a scouting mission, resources and troops), c=2 reinforcement.
+        `slots` maps form slot (1-10 tribe units, 11+ extra units) -> count. True if the game accepted it
+        (and, with `check_unit`, if that many fewer of it are at home afterwards)."""
+        data = {"b": 1, "c": c, "x": x, "y": y, "dname": "", "disabledr": "", "disabled": "", "s1": "ok"}
+        for slot, n in slots.items():
+            data[f"t{slot}"] = int(n)
+        page = self.post("a2b.php", data)
+        confirm = parse.parse_a2b_confirm(page)
+        if confirm is None or "beginners protection" in page:
+            return False
+        before = parse.parse_troops(parse._soup(self.get("dorf1.php"))).get(check_unit, 0) if check_unit else 0
+        self.post("a2b.php", confirm)
+        if not check_unit:
+            return True
+        after = parse.parse_troops(parse._soup(self.get("dorf1.php"))).get(check_unit, 0)
+        return after < before
+
+    def map_block(self, cx, cy):
+        """The 17x17 map tiles around (cx|cy), as parse.parse_map_block()."""
+        return parse.parse_map_block(self.get(f"ajax.php?f=k7&x={cx - 8}&y={cy - 8}&xx={cx + 8}&yy={cy + 8}"))
+
+    def oasis_animals(self, x, y):
+        """Animals in the unoccupied oasis at (x|y): a number (0 = empty) or None if it isn't one."""
+        wref = tile_id(x, y)
+        return parse.parse_oasis_animals(self.get(f"karte.php?d={wref}&c={map_check(wref)}"))
+
+    def reports(self):
+        """The newest page of reports: [{"id", "topic"}]."""
+        return parse.parse_report_list(self.get("berichte.php"))
+
+    def report(self, rid):
+        """One report (opening it marks it read), as parse.parse_report()."""
+        return parse.parse_report(self.get(f"berichte.php?id={int(rid)}"))
+
     def coordinates(self):
         """(x, y) of the current village (the map opens centred on it)."""
         return parse.parse_map_center(self.get("karte.php"))

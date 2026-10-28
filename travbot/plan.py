@@ -80,6 +80,26 @@ DEFAULT_PLAN = {
         "capital_reserve": 6000,
         "max_per_tick": 2,
     },
+    "raid": {
+        # farm safe targets for resources (travbot/raid.py): inactive players, empty oases and
+        # the admin farm accounts once scouting shows them undefended; never active players
+        "enabled": True,
+        "radius": 12,                 # tiles from the raiding village
+        "unit_target": 30,            # raiders each village keeps (on top of the defenders)
+        "budget_share": 0.15,         # share of each resource a training order may use
+        "max_out": 3,                 # raids/scouting missions under way per village
+        "first_wave": 10,
+        "min_wave": 5,
+        "max_wave": 60,
+        "cooldown_hours": 6,          # before the same target again (longer after a poor haul)
+        "inactive_days": 3,           # population unchanged this long = inactive
+        "block_days": 3,              # after losses or a defended scouting result
+        "active_players": False,
+        "farm_accounts": ["Farm", "Farm1", "Farm2", "Farm3", "Farm4", "Farm5"],
+        "exclude": ["Admin", "Multihunter", "Taskmaster", "Natars", "Nature", "Brandon"],  # Brandon: server owner
+        "scout_count": 2,
+        "rescout_hours": 24,          # farms are scouted again, oases' animals re-checked, this often
+    },
     "share": {
         # rich villages ship surplus resources to young ones through the Marketplace
         "enabled": True,
@@ -170,6 +190,23 @@ def validate(raw):
             v = _num(gold, key, lo, hi, cast)
             if v is not None:
                 plan["gold"][key] = v
+
+    raid = raw.get("raid")
+    if isinstance(raid, dict):
+        for key in ("enabled", "active_players"):
+            if isinstance(raid.get(key), bool):
+                plan["raid"][key] = raid[key]
+        for key, lo, hi, cast in (("radius", 1, 30, int), ("unit_target", 0, 500, int), ("budget_share", 0, 1, float),
+                                  ("max_out", 0, 20, int), ("first_wave", 1, 500, int), ("min_wave", 1, 500, int),
+                                  ("max_wave", 1, 1000, int), ("cooldown_hours", 0, 168, float),
+                                  ("inactive_days", 1, 30, float), ("block_days", 0, 60, float),
+                                  ("scout_count", 1, 20, int), ("rescout_hours", 1, 240, float)):
+            v = _num(raid, key, lo, hi, cast)
+            if v is not None:
+                plan["raid"][key] = v
+        for key in ("farm_accounts", "exclude"):
+            if isinstance(raid.get(key), list) and all(isinstance(n, str) for n in raid[key]):
+                plan["raid"][key] = raid[key][:50]
 
     share = raw.get("share")
     if isinstance(share, dict):

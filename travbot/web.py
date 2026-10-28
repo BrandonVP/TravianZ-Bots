@@ -103,6 +103,17 @@ def _diplomacy_card(d):
     return f'<div class="card"><h2>Alliance</h2>{"".join(rows)}</div>'
 
 
+def _raid_html(r):
+    """Raids summary (travbot/raid.py RaidBook.summary)."""
+    e = html.escape
+    if not r:
+        return '<p class="muted">no raids yet</p>'
+    days = "".join(f"<li>{e(d)}: {t['raids']} raids, {t['loot']:,} resources</li>" for d, t in r.get("totals", {}).items())
+    return (f'<p>{r.get("out", 0)} under way &middot; {r.get("known_villages", 0)} villages and '
+            f'{r.get("empty_oases", 0)} empty oases known &middot; {r.get("blocked", 0)} targets blocked</p>'
+            f'<ul>{days or "<li class=muted>no loot yet</li>"}</ul>')
+
+
 def render(state_dir, name="AIBot", nav=""):
     e = html.escape
     status = _read_json(state_dir / "status.json")
@@ -130,7 +141,8 @@ def render(state_dir, name="AIBot", nav=""):
             f'<div class="card"><h2>AI advisor</h2><p>Last plan {_ago(adv.get("last_success"))}'
             f'{" by " + e(adv["last_model"]) if adv.get("last_model") else ""}; last attempt {_ago(adv.get("last_attempt"))}.</p>'
             f'<div class="notes">{e(plan.get("notes") or "No AI notes yet.")}</div>'
-            f'<h3>Building targets</h3><div>{targets}</div><h3>Expansion</h3><ul>{exp_html}</ul></div>'
+            f'<h3>Building targets</h3><div>{targets}</div><h3>Expansion</h3><ul>{exp_html}</ul>'
+            f'<h3>Raids</h3>{_raid_html(status.get("raid"))}</div>'
             f'<div class="card"><h2>Recent actions</h2><table>{actions}</table></div>'
             f'{_diplomacy_card(status.get("diplomacy"))}</div>'
         )

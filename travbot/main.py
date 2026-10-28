@@ -34,6 +34,7 @@ from .advisor import Advisor
 from .client import GameClient, GameError, tile_id
 from .diplomacy import Diplomacy, template_letter
 from .expand import Expansion
+from .raid import RaidBook, raider_choices, scout_unit, form_slot, dist as raid_dist
 
 log = logging.getLogger("travbot")
 
@@ -116,6 +117,8 @@ class Bot:
         self.capital_checked = 0.0
         self.archers = False       # server has the Archery Range units (checked hourly)
         self.archers_checked = 0.0
+        self.raid = RaidBook(state_dir)
+        self.raiders = {}          # village id -> raider unit id the village can train (None: none yet)
 
     def _act(self, cand, href, actions, label):
         from .names import display, display_text
@@ -358,6 +361,120 @@ class Bot:
             write_json(path, {k: ts for k, ts in sent.items() if now - ts < 24 * 3600})
         return actions
 
+    def raids(self, villages, plan):
+        """Raid safe targets (travbot/raid.py): learn from new reports, refresh the map once a day,
+        check oases for animals, then send scouts/raids from villages with raiders at home."""
+        r = plan["raid"]
+        if not r["enabled"]:
+            return []
+        book, now, actions = self.raid, time.time(), []
+        me = self.client.user
+        ally_names = {a.get("account") for a in self.allies if a.get("account")}
+        own = {v["name"] for v in villages}
+        raider_ids = {u for u in self.raiders.values() if u}
+        scout = scout_unit(self.tribe)
+
+        # 1. reports of our own raids and scouting missions
+        seen = set(book.data["seen_reports"])
+        for rep in self.client.reports():
+            if rep["id"] in seen:
+                continue
+            seen.add(rep["id"])
+            book.data["seen_reports"].append(rep["id"])
+            topic = rep["topic"]
+            # our own missions: learn() matches them by target village against what we sent
+            # (a single-village account has no village names in the list to match the topic with)
+            if not book.data["out"] or (" attacks " not in topic and " scouts " not in topic)                     or any(topic.endswith(" " + n) for n in own):
+                continue
+            parsed = self.client.report(rep["id"])
+            if parsed:
+                line = book.learn(parsed, raider_ids, scout, r, now)
+                if line:
+                    log.info("raid: %s", line)
+
+        # 2. the map around every village, once a day
+        coords = [tuple(self.coords[v["id"]]) for v in villages if self.coords.get(v["id"])]
+        own_alliance = None
+        if coords and book.scan_due(24, now):
+            done = set()
+            for (x, y) in coords:
+                for cx, cy in ((x - 6, y - 6), (x + 6, y - 6), (x - 6, y + 6), (x + 6, y + 6)):
+                    if (cx, cy) in done:
+                        continue
+                    done.add((cx, cy))
+                    tiles = self.client.map_block(cx, cy)
+                    book.observe(tiles, now)
+            log.info("raid: map scanned, %d villages and %d free oases known",
+                     len(book.data["villages"]), len(book.data["oases"]))
+        for v in book.data["villages"].values():
+            if v.get("owner") == me and v.get("alliance"):
+                own_alliance = v["alliance"]
+                break
+
+        # 3. a few oases' animals (unoccupied oases are only worth it when empty)
+        for (x, y) in coords:
+            for key in book.oases_to_check((x, y), r["radius"], r["rescout_hours"], 3, now):
+                o = book.data["oases"][key]
+                book.set_animals(key, self.client.oasis_animals(o["x"], o["y"]), now)
+
+        # 4. send
+        for v in villages:
+            c = self.coords.get(v["id"])
+            st = v["state"]
+            if not c or st["incoming"]["attacks"] or not rules.find_slot(st, "Rally Point"):
+                continue
+            room = r["max_out"] - len(book.out_from(v["id"], now))
+            if room <= 0:
+                continue
+            # the best raider actually at home (defenders stay home), else the one the village trains
+            raider, spare = self.raiders.get(v["id"]), 0
+            for u in raider_choices(self.tribe):
+                keep = plan["defense"]["unit_target"] if u == rules.basic_defender(self.tribe) else 0
+                n = st["troops"].get(u, 0) - keep
+                if n >= r["min_wave"]:
+                    raider, spare = u, n
+                    break
+            scouts = st["troops"].get(scout, 0) if scout else 0
+            for t in book.plan_raids(tuple(c), r, me, ally_names, own_alliance, now):
+                if room <= 0:
+                    break
+                if t["action"] == "scout":
+                    if scouts < r["scout_count"]:
+                        continue
+                    n, unit, mode = r["scout_count"], scout, 3
+                else:
+                    n = min(book.wave(t["key"], r), spare)
+                    if not raider or n < r["min_wave"]:
+                        continue
+                    unit, mode = raider, 4
+                what = f"{t['action']} {t['name']} ({t['x']}|{t['y']}, {t['kind']}"
+                what += f", {t['owner']})" if t.get("owner") else ")"
+                self.vname = v["name"]
+                log.info("[%s] %s%s with %d %s", v["name"], "[dry-run] " if self.dry_run else "", what, n,
+                         units.plural(units.name(unit)) if n != 1 else units.name(unit))
+                ok = True
+                if not self.dry_run:
+                    if v["id"] is not None:
+                        self.client.select_village(v["id"])
+                    ok = self.client.send_troops(t["x"], t["y"], mode, {form_slot(unit): n}, check_unit=unit)
+                if not ok:
+                    log.info("[%s] the game refused the %s on %s; skipping it for a day", v["name"], t["action"], t["name"])
+                    book.data["targets"].setdefault(t["key"], {})["blocked_until"] = now + 86400
+                    continue
+                if not self.dry_run:
+                    book.sent(v["id"], t["key"], t["action"], n, now)
+                room -= 1
+                if mode == 3:
+                    scouts -= n
+                else:
+                    spare -= n
+                actions.append({"action": t["action"], "name": f"{n} {units.name(unit)} to {t['name']}",
+                                "slot": 39, "reason": t["kind"], "village": v["name"], "time": int(now)})
+        book.forget_old(now)
+        if not self.dry_run:
+            book.save()
+        return actions
+
     def village_tick(self, vid, state, plan, village_count):
         """Place orders for one village. Returns (state, actions, waits, reserved, note)."""
         actions, waits, note = [], [], None
@@ -414,7 +531,64 @@ class Bot:
                 self._defend_ranged(state, plan, reserved, actions)
             except (requests.RequestException, GameError, ValueError, KeyError) as e:
                 log.warning("[%s] archer defence failed: %s", self.vname, e)
+            try:
+                self._train_raiders(vid, state, plan, reserved, actions)
+            except (requests.RequestException, GameError, ValueError, KeyError) as e:
+                log.warning("[%s] raider training failed: %s", self.vname, e)
         return state, actions, waits, reserved, note
+
+    def _train_page_for(self, state, unit):
+        """(slot, train page) of the Barracks or Stable that offers `unit`, or (None, None)."""
+        for building in ("Barracks", "Stable"):
+            slot = rules.find_slot(state, building)
+            if slot is None:
+                continue
+            page = self.client.train_page(slot)
+            if unit in page["units"]:
+                return slot, page
+        return None, None
+
+    def _order(self, state, plan, reserved, actions, unit, target, share, why):
+        """Train `unit` up to `target` (counting those at home) within `share` of each resource."""
+        slot, page = self._train_page_for(state, unit)
+        if slot is None:
+            return False
+        info = page["units"][unit]
+        count = min(rules.troop_order(info["cost"], state["troops"].get(unit, 0), page["training"].get(unit, 0),
+                                      target, state["resources"], share), info["max"])
+        if count <= 0:
+            return True
+        spend = {k: c * count for k, c in info["cost"].items()}
+        if reserved and rules.delays_reserved(reserved["cost"], state["resources"], spend):
+            return True
+        log.info("[%s] %strain %d %s (slot %d) for %s", self.vname, "[dry-run] " if self.dry_run else "",
+                 count, units.name(unit), slot, why)
+        if not self.dry_run:
+            self.client.train(slot, unit, count)
+        actions.append({"action": "train", "name": units.name(unit), "count": count, "slot": slot,
+                        "reason": why, "time": int(time.time())})
+        return True
+
+    def _train_raiders(self, vid, state, plan, reserved, actions):
+        """Raiding villages (with a Rally Point) keep `raid.unit_target` raiders on top of their
+        defenders, and a few scouts for looking at targets first."""
+        r = plan["raid"]
+        if not r["enabled"] or r["unit_target"] <= 0 or not rules.find_slot(state, "Rally Point"):
+            return
+        defender = rules.basic_defender(self.tribe)
+        raider = None
+        for u in raider_choices(self.tribe):
+            slot, _ = self._train_page_for(state, u)
+            if slot is not None:
+                raider = u
+                break
+        self.raiders[vid] = raider
+        if raider is not None:
+            extra = plan["defense"]["unit_target"] if raider == defender else 0
+            self._order(state, plan, reserved, actions, raider, r["unit_target"] + extra, r["budget_share"], "raiding")
+        scout = scout_unit(self.tribe)
+        if scout:
+            self._order(state, plan, reserved, actions, scout, 2 * r["scout_count"], r["budget_share"], "scouting")
 
     def tick(self, plan):
         """One round over all villages. Returns (status_villages, actions, sleep_seconds)."""
@@ -479,6 +653,10 @@ class Bot:
             all_actions += self.reinforce(seen, plan)
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
             log.warning("reinforcement failed: %s", e)
+        try:
+            all_actions += self.raids(seen, plan)
+        except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+            log.warning("raiding failed: %s", e)
         if self.diplomacy:
             try:
                 msg = self.diplomacy.step(self.client, seen, self.dry_run)
@@ -536,6 +714,7 @@ def run_bot(state_dir, args, ready):
             history = (history + actions)[-50:]
             status = {"updated": int(time.time()), "account": account["user"], "plan_source": source,
                       "tribe": bot.tribe, "villages": villages, "expansion": bot.expansion.summary(),
+                      "raid": bot.raid.summary(),
                       "diplomacy": bot.diplomacy.summary() if bot.diplomacy else None,
                       "recent_actions": history, "next_tick_in": int(sleep)}
             if not args.dry_run:
