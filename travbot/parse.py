@@ -254,6 +254,8 @@ def parse_train_page(html):
     """Barracks/Residence page: trainable units and what is in training.
 
     Returns {"form": bool, "units": {uid: {"cost", "max", "available"}}, "training": {uid: count}}.
+    Elite units (heavy cavalry, siege, chiefs, settlers) also cost village gold: the cost line shows a
+    coin (svg.tz-coin-sm) followed by the gold per unit, which becomes cost["gold"].
     """
     soup = _soup(html)
     form = soup.find("form", attrs={"name": "snd"})
@@ -269,8 +271,14 @@ def parse_train_page(html):
             nums = _ints(details.get_text(" ", strip=True).split(":")[0]) if details else []
             info = row.find("span", class_="info")
             maxcell = row.find("td", class_="max")
+            cost = dict(zip(RESOURCES, nums[:4])) if len(nums) >= 4 else None
+            coin = details.find("svg", class_="tz-coin-sm") if details else None
+            if cost is not None and coin is not None:
+                g = _ints(str(coin.next_sibling or ""))
+                if g:
+                    cost["gold"] = g[0]
             out["units"][uid] = {
-                "cost": dict(zip(RESOURCES, nums[:4])) if len(nums) >= 4 else None,
+                "cost": cost,
                 "available": (_ints(info.get_text()) or [0])[0] if info else 0,
                 "max": (_ints(maxcell.get_text()) or [0])[0] if maxcell else 0,
             }

@@ -167,7 +167,7 @@ class Bot:
             return
         share = d["emergency_share"] if under_attack else d["budget_share"]
         count = rules.troop_order(info["cost"], state["troops"].get(unit, 0), page["training"].get(unit, 0),
-                                  d["unit_target"], state["resources"], share)
+                                  d["unit_target"], rules.stock(state), share)
         count = min(count, info["max"])
         if count <= 0:
             return
@@ -210,7 +210,7 @@ class Bot:
                             "reason": "archer defence", "time": int(time.time())})
             return
         count = rules.troop_order(info["cost"], state["troops"].get(unit, 0), page["training"].get(unit, 0),
-                                  d["ranged_target"], state["resources"], d["budget_share"])
+                                  d["ranged_target"], rules.stock(state), d["budget_share"])
         count = min(count, info["max"])
         if count <= 0:
             return
@@ -577,7 +577,7 @@ class Bot:
             return False
         info = page["units"][unit]
         count = min(rules.troop_order(info["cost"], state["troops"].get(unit, 0), page["training"].get(unit, 0),
-                                      target, state["resources"], share), info["max"])
+                                      target, rules.stock(state), share), info["max"])
         if count <= 0:
             return True
         spend = {k: c * count for k, c in info["cost"].items()}

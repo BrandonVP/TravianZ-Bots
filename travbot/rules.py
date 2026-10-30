@@ -218,8 +218,8 @@ def troop_order(unit_cost, have, in_training, target, resources, share):
     missing = target - have - in_training
     if missing <= 0 or not unit_cost:
         return 0
-    afford = min((int(resources[k]["amount"] * share) // c) if c else missing
-                 for k, c in unit_cost.items())
+    afford = min(((int(resources[k]["amount"] * share) // c) if c else missing)
+                 for k, c in unit_cost.items() if k in resources)   # a cost the stock doesn't track is ignored
     return max(0, min(missing, afford))
 
 
