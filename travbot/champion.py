@@ -66,15 +66,26 @@ class ChampionKeeper:
 
     # ------------------------------------------------------------------ one round
     def step(self, slot, cfg):
-        """Run every champion rule once from the Champion's Hall in `slot` of the selected village."""
+        """Run every champion rule once from the Champion's Hall in `slot` of the selected village,
+        for each living champion of the account (the game lists them; ?champ=<heroid> picks one)."""
+        first = page_data(self.client.get(f"build.php?id={slot}&t4tab=items"), "tz-champ")
+        if not first or not first.get("hero"):
+            return []   # no champion (training one is left to the player)
+        champs = [c for c in first.get("champions") or [] if not c.get("dead")] or [None]
+        actions = []
+        for i, ch in enumerate(champs):
+            base = f"build.php?id={slot}" + (f"&champ={ch['heroid']}" if ch else "")
+            actions += self._step_one(base, cfg, auction=(i == 0))   # one Auction House round per tick
+        return actions
+
+    def _step_one(self, base, cfg, auction):
+        """The rules for the champion picked in `base`."""
         actions = []
         weights = ROLE_WEIGHTS.get(cfg["role"], ROLE_WEIGHTS["economy"])
-        base = f"build.php?id={slot}"
 
-        inv_html = self.client.get(base + "&t4tab=items")
-        inv = page_data(inv_html, "tz-champ")
+        inv = page_data(self.client.get(base + "&t4tab=items"), "tz-champ")
         if not inv or not inv.get("hero"):
-            return actions   # no champion (training one is left to the player)
+            return actions
         hero = inv["hero"]
 
         # 1. stat points, by the role's weights (never above 100 in a stat)
@@ -111,7 +122,7 @@ class ChampionKeeper:
                 actions.append(q)
 
         # 6. the Auction House
-        if cfg["auction"]:
+        if cfg["auction"] and auction:
             b = self._bid(base, inv, weights, cfg)
             if b:
                 actions.append(b)
