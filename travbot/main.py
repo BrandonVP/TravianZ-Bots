@@ -33,6 +33,7 @@ from . import rules, units, web
 from .advisor import Advisor
 from .client import GameClient, GameError, tile_id
 from .diplomacy import Diplomacy, template_letter
+from .humans import HumanAllies
 from .expand import Expansion
 from .raid import RaidBook, raider_choices, scout_unit, form_slot, dist as raid_dist
 from .champion import ChampionKeeper
@@ -122,6 +123,7 @@ class Bot:
         self.raiders = {}          # village id -> raider unit id the village can train (None: none yet)
         self.champion = ChampionKeeper(client, dry_run)
         self.champion_checked = 0.0
+        self.humans = HumanAllies(state_dir)   # human members of the alliance: gifts and defence
 
     def _act(self, cand, href, actions, label):
         from .names import display, display_text
@@ -312,6 +314,8 @@ class Bot:
         for a in self.allies:
             targets += [{"name": f"{a.get('account')}'s {v['name']}", "coords": v.get("coords"),
                          "incoming": v.get("incoming") or {}} for v in a.get("villages", [])]
+        if d.get("reinforce_humans", True):
+            targets += self.humans.targets(self.client.user)
         targets = [t for t in targets if t["coords"] and (t["incoming"].get("attacks") or 0) > 0]
         if not targets:
             return []
@@ -358,6 +362,10 @@ class Bot:
                     log.info("[%s] the game refused the reinforcement to %s", v["name"], t["name"])
                     continue
                 sent[key] = now
+                try:
+                    self.humans.note_reinforcement(self.client, t, what, self.client.user, self.dry_run)
+                except (requests.RequestException, GameError) as e:
+                    log.warning("could not write to %s: %s", t.get("human"), e)
                 actions.append({"action": "reinforce", "name": f"{what} to {t['name']}",
                                 "slot": 39, "reason": "attack incoming", "village": v["name"], "time": int(now)})
         if not self.dry_run:
@@ -671,6 +679,11 @@ class Bot:
             all_actions += self.share(seen, plan)
         except (requests.RequestException, GameError, ValueError, KeyError) as e:
             log.warning("resource sharing failed: %s", e)
+        try:  # the alliance's human members: read once per round for gifts and reinforcement targets
+            if self.humans.refresh(self.client):
+                all_actions += self.humans.gifts(self.client, seen, plan, self.client.user, self.coords, self.dry_run)
+        except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+            log.warning("help for human members failed: %s", e)
         try:
             all_actions += self.reinforce(seen, plan)
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:

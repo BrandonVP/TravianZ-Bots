@@ -249,6 +249,14 @@ def template_letter(kind, ctx):
                 f"While your village is young we will send it resources now and then, and if you are attacked, "
                 f"we will send what troops we can. Write to any of us whenever you need something - "
                 f"we are not always at our desks, but we answer.\n\n{ctx['me']}")
+    if kind == "gift":
+        return (f"Supplies for {ctx['village']}",
+                f"Greetings {ctx['to']},\n\nOur merchants are on the road to {ctx['village']} with {ctx['what']}. "
+                f"A young village needs a hand - use it well, and grow strong.\n\n{ctx['me']}")
+    if kind == "reinforce":
+        return (f"Help is on the way to {ctx['village']}",
+                f"Greetings {ctx['to']},\n\nOur scouts saw an enemy marching on {ctx['village']}. "
+                f"I have sent {ctx['what']} to stand with you - not many, but you will not face them alone.\n\n{ctx['me']}")
     return ("Greetings", f"Greetings {ctx.get('to', '')},\n\n{ctx['me']}")
 
 

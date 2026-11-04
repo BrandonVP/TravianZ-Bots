@@ -53,6 +53,8 @@ DEFAULT_PLAN = {
         "reinforce_share": 0.5,
         # only villages within this many tiles of the attacked one send help
         "reinforce_radius": 15,
+        # also reinforce human alliance members (humans.py), with a note to them
+        "reinforce_humans": True,
         # Archery Range skirmishers (anti-archer defence) to keep in each village. Only on
         # servers with archers: then the bot also aims for Barracks 3, Academy 5 and an
         # Archery Range 5, researches the skirmisher and sends them along when reinforcing.
@@ -132,6 +134,11 @@ DEFAULT_PLAN = {
         "min_shipment": 1000,
         # also ship to young villages of the allied bots (same alliance)
         "allies": True,
+        # gifts to young villages of human alliance members (humans.py): nearest bot only, once a day per member
+        "humans": True,
+        "human_gift_hours": 1.0,      # at most this many hours of the donor village's production
+        "human_young_pop": 500,       # a member's village below this population counts as young
+        "human_min_gift": 300,
         # for shipments to allies the donor keeps at least this share of its storage
         "ally_keep_share": 0.3,
     },
@@ -179,8 +186,9 @@ def validate(raw):
 
     defense = raw.get("defense")
     if isinstance(defense, dict):
-        if isinstance(defense.get("reinforce"), bool):
-            plan["defense"]["reinforce"] = defense["reinforce"]
+        for key in ("reinforce", "reinforce_humans"):
+            if isinstance(defense.get(key), bool):
+                plan["defense"][key] = defense[key]
         for key, lo, hi, cast in (("unit_target", 0, 1000, int), ("budget_share", 0, 0.9, float),
                                   ("emergency_share", 0, 1, float), ("reinforce_keep", 0, 1000, int),
                                   ("reinforce_share", 0, 1, float), ("reinforce_radius", 1, 50, int),
@@ -245,12 +253,13 @@ def validate(raw):
 
     share = raw.get("share")
     if isinstance(share, dict):
-        for key in ("enabled", "allies"):
+        for key in ("enabled", "allies", "humans"):
             if isinstance(share.get(key), bool):
                 plan["share"][key] = share[key]
         for key, lo, hi, cast in (("young_ratio", 0, 1, float), ("donor_keep_share", 0, 0.95, float),
                                   ("fill_to", 0.1, 1, float), ("min_shipment", 0, 100000, int),
-                                  ("ally_keep_share", 0, 0.95, float)):
+                                  ("ally_keep_share", 0, 0.95, float), ("human_gift_hours", 0, 4, float),
+                                  ("human_young_pop", 0, 5000, int), ("human_min_gift", 0, 100000, int)):
             v = _num(share, key, lo, hi, cast)
             if v is not None:
                 plan["share"][key] = v
