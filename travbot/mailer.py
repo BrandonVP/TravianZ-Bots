@@ -129,7 +129,7 @@ class Mailer:
             try:
                 r = requests.post(f"{self.ollama}/api/chat", timeout=180, json={
                     "model": model, "stream": False, "think": False, "format": REPLY_SCHEMA, "keep_alive": "10m",
-                    "options": {"temperature": 0.7, "num_ctx": 2048},
+                    "options": {"temperature": 0.7, "num_ctx": 2048, "num_predict": 600},
                     "messages": [{"role": "system", "content": who + facts + style},
                                  {"role": "user", "content": task}]})
                 r.raise_for_status()

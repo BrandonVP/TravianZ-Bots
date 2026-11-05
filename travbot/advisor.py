@@ -242,7 +242,7 @@ class Advisor:
             "think": False,
             "format": PLAN_SCHEMA,
             "keep_alive": 0,  # unload right after answering: give the GPU straight back
-            "options": {"temperature": 0.3, "num_ctx": 8192},
+            "options": {"temperature": 0.3, "num_ctx": 8192, "num_predict": 3000},  # cap: small models can run away on a strict format
             "messages": [{"role": "system", "content": display_text(system_prompt(self.tribe))},
                          {"role": "user", "content": _summary(status, current_plan)}],
         })
@@ -271,7 +271,7 @@ class Advisor:
             try:
                 r = requests.post(f"{self.ollama}/api/chat", timeout=180, json={
                     "model": model, "stream": False, "think": False, "format": LETTER_SCHEMA, "keep_alive": 0,
-                    "options": {"temperature": 0.8, "num_ctx": 2048},
+                    "options": {"temperature": 0.8, "num_ctx": 2048, "num_predict": 600},
                     "messages": [{"role": "user", "content": task}]})
                 r.raise_for_status()
                 out = json.loads(r.json()["message"]["content"])
