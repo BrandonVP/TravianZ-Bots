@@ -814,6 +814,15 @@ def main():
         if i + 1 < len(bots):
             time.sleep(20)  # stagger the accounts a little
     log.info("running %d bot(s): %s", len(bots), ", ".join(n for n, _ in bots))
+
+    # The Sentry (AI sitter, travbot/sentry.py): one extra thread, only when its folder holds sentry.json
+    sentry_dir = pathlib.Path(os.environ.get("TRAVBOT_SENTRY_DIR", str(primary.parent / "sentry")))
+    if (sentry_dir / "sentry.json").is_file() and not args.only:
+        from .sentry import Sentry
+        sentry = Sentry(sentry_dir, dry_run=args.dry_run)
+        th = threading.Thread(target=sentry.run, kwargs={"once": args.once}, name="Sentry", daemon=True)
+        th.start()
+        threads.append(th)
     for th in threads:
         th.join()
 
