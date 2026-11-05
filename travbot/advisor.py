@@ -216,13 +216,15 @@ class Advisor:
         self.state_file.write_text(json.dumps(st, indent=2), encoding="utf-8")
 
     def pc_idle(self):
-        """(idle?, reason). An unreachable PC counts as not idle."""
-        try:
-            info = requests.get(self.idle_url, timeout=5).json()
-        except (requests.RequestException, ValueError) as e:
-            return False, f"idle check unreachable ({type(e).__name__})"
-        if not info.get("idle"):
-            return False, "PC busy: " + ", ".join(info.get("busy_reasons") or ["unknown"])
+        """(idle?, reason). An unreachable PC counts as not idle. No idle URL (TRAVBOT_IDLE_URL="") = a dedicated
+        Ollama server that is always available; only the "another model is loaded" check applies."""
+        if self.idle_url:
+            try:
+                info = requests.get(self.idle_url, timeout=5).json()
+            except (requests.RequestException, ValueError) as e:
+                return False, f"idle check unreachable ({type(e).__name__})"
+            if not info.get("idle"):
+                return False, "PC busy: " + ", ".join(info.get("busy_reasons") or ["unknown"])
         try:
             loaded = [m["name"] for m in requests.get(f"{self.ollama}/api/ps", timeout=5).json().get("models", [])]
         except (requests.RequestException, ValueError) as e:
@@ -282,6 +284,10 @@ class Advisor:
 
     def maybe_run(self, status, current_plan, force=False):
         """Run a review if one is due and the PC is idle. Returns a short log string."""
+        # a hand-written plan ("source": "manual...") is never replaced by the model; the model then only writes letters
+        if not force and ("(manual" in str((status or {}).get("plan_source", ""))
+                          or str((current_plan or {}).get("source", "")).startswith("manual")):
+            return None
         st = self._load_state()
         now = time.time()
         if not force:

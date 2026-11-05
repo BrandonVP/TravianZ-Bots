@@ -8,7 +8,7 @@ Environment:
   TRAVBOT_PLAN_MAX_AGE_HOURS  plan.json older than this is ignored (default 6)
   TRAVBOT_MAX_ACTIONS         build orders per village per tick at most (default 6)
   TRAVBOT_OLLAMA_URL          Ollama for the advisor (default http://192.168.68.87:11434; empty disables)
-  TRAVBOT_IDLE_URL            idle check (default http://192.168.68.87:8911/idle.json)
+  TRAVBOT_IDLE_URL            idle check (default http://192.168.68.87:8911/idle.json; empty = always-on Ollama server)
   TRAVBOT_ADVISOR_MODELS      comma-separated, tried in order (default gemma4:26b,ornith:9b)
   TRAVBOT_ADVISOR_INTERVAL_MIN  minutes between successful reviews (default 60)
   TRAVBOT_ADVISOR_RETRY_MIN     minutes between attempts while the PC is busy (default 10)
