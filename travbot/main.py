@@ -32,7 +32,7 @@ from . import plan as planmod
 from . import rules, units, web
 from .advisor import Advisor
 from .client import GameClient, GameError, tile_id
-from .diplomacy import Diplomacy, template_letter
+from .diplomacy import Diplomacy, join_list, template_letter
 from .humans import HumanAllies
 from .expand import Expansion
 from .raid import RaidBook, raider_choices, scout_unit, form_slot, dist as raid_dist
@@ -348,7 +348,7 @@ class Bot:
                         extra[units.extra_slot(skirm)] = n
                 if count < 1 and not extra:
                     continue
-                what = ", ".join([f"{count} {units.name(unit)}"] * (count > 0)
+                what = join_list([f"{count} {units.name(unit)}"] * (count > 0)
                                  + [f"{n} {units.name(skirm)}" for n in extra.values()])
                 self.vname = v["name"]
                 log.info("[%s] %sreinforce %s (%s|%s) with %s: attack incoming", v["name"],
@@ -363,7 +363,8 @@ class Bot:
                     continue
                 sent[key] = now
                 try:
-                    self.humans.note_reinforcement(self.client, t, what, self.client.user, self.dry_run)
+                    self.humans.note_reinforcement(self.client, t, what, self.client.user, self.dry_run,
+                                                   count + sum(extra.values()))
                 except (requests.RequestException, GameError) as e:
                     log.warning("could not write to %s: %s", t.get("human"), e)
                 actions.append({"action": "reinforce", "name": f"{what} to {t['name']}",

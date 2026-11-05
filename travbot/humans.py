@@ -20,13 +20,14 @@ import threading
 import time
 
 from . import rules
-from .diplomacy import template_letter
+from .diplomacy import join_list, template_letter
 
 log = logging.getLogger(__name__)
 
 ACTIVE_S = 3 * 24 * 3600        # members inactive longer get no gifts (abandoned villages feed raiders)
 GIFT_EVERY_S = 24 * 3600        # one gift per member per day, whichever bot gives it
 NOTE_EVERY_S = 3 * 24 * 3600    # a gift note at most every 3 days per member
+SMALL_FORCE = 100               # reinforcement letters say "not many" below this many troops
 _LOCK = threading.Lock()        # the bots run as threads of one process and share the ledger
 
 
@@ -85,12 +86,13 @@ class HumanAllies:
             t["arrives"] = min(t["arrives"], a["arrives"])
         return list(out.values())
 
-    def note_reinforcement(self, client, target, what, me, dry_run):
-        """Tell the member help is coming (once per reinforcement; Bot.reinforce has its own cooldown)."""
+    def note_reinforcement(self, client, target, what, me, dry_run, troops=0):
+        """Tell the member help is coming (once per reinforcement; Bot.reinforce has its own cooldown).
+        `troops` = how many were sent; below SMALL_FORCE the letter says "not many"."""
         if dry_run or not target.get("human"):
             return
         subject, text = template_letter("reinforce", {"me": me, "to": target["human"], "village": target["village"],
-                                                      "what": what})
+                                                      "what": what, "small": troops < SMALL_FORCE})
         client.send_message(target["human"], subject, text)
 
     # --- gifts ------------------------------------------------------------------
@@ -136,7 +138,7 @@ class HumanAllies:
                 ship = self._gift(state, sp, market["merchants"] * market["carry"], (donor.get("reserved") or {}).get("cost"))
                 if not ship:
                     continue
-                what = ", ".join(f"{k} {n}" for k, n in ship.items() if n)
+                what = join_list([f"{n} {k}" for k, n in ship.items() if n])
                 log.info("[%s] %sgift %s to %s's %s (%s|%s)", donor["name"], "[dry-run] " if dry_run else "",
                          what, m["name"], target["name"], target["x"], target["y"])
                 if not dry_run:

@@ -218,6 +218,19 @@ class Diplomacy:
         return None
 
 
+def join_list(parts):
+    """["600 wood", "600 clay", "128 crop"] -> "600 wood, 600 clay and 128 crop"."""
+    parts = [p for p in parts if p]
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _your(village):
+    """"your Nova Roma", but "Livia's village" (a name that already says whose it is)."""
+    return village if "'s " in f"{village} ".lower() else f"your {village}"
+
+
 def template_letter(kind, ctx):
     """Plain letters for when the AI writer is unavailable."""
     if kind == "invite":
@@ -232,13 +245,21 @@ def template_letter(kind, ctx):
                 f"My village is ready to stand with yours - may our merchants travel safely between us.\n\n{ctx['me']}")
     if kind == "invite_player":
         near = ctx.get("near")
-        where = (f"{near['place']} lies {near['away']} from your {ctx['village']}"
-                 if near else f"our villages are not far from your {ctx['village']}")
-        return ((f"Still an open door: {ctx['alliance']}" if ctx.get("again") else f"Neighbours in arms: {ctx['alliance']}"),
+        if ctx.get("again"):
+            # the second and last invitation (max_invites), a week after the first
+            near_line = (f"{near['place']} is {near['away']} from you, and we look after our own. "
+                         if near else "we look after our own. ")
+            return (f"Still an open door: {ctx['alliance']}",
+                    f"Greetings {ctx['to']},\n\nA week ago I wrote to you about {ctx['alliance']} [{ctx['tag']}]. "
+                    f"The offer stands: {near_line}The invitation is still at your Embassy.\n\n"
+                    f"This is the last time I will ask - the door stays open.\n\n{ctx['me']}")
+        where = (f"{near['place']} lies {near['away']} from {_your(ctx['village'])}"
+                 if near else f"our villages are not far from {_your(ctx['village'])}")
+        return (f"Neighbours in arms: {ctx['alliance']}",
                 f"Greetings {ctx['to']},\n\nNews of a new settlement travels fast - {where}. "
                 f"We of {ctx['alliance']} [{ctx['tag']}] look after our own: we send grain and timber to young villages, "
                 f"and when raiders come we march to help, however few we can spare.\n\n"
-                f"An invitation waits for you at your Embassy (you can build one from the Town Center at level 1). "
+                f"An invitation waits for you at your Embassy (you can build one once your Town Center reaches level 1). "
                 f"Join us if you wish - and if you ever want to leave for another alliance, you part as a friend.\n\n{ctx['me']}")
     if kind == "welcome":
         near = ctx.get("near")
@@ -256,7 +277,10 @@ def template_letter(kind, ctx):
     if kind == "reinforce":
         return (f"Help is on the way to {ctx['village']}",
                 f"Greetings {ctx['to']},\n\nOur scouts saw an enemy marching on {ctx['village']}. "
-                f"I have sent {ctx['what']} to stand with you - not many, but you will not face them alone.\n\n{ctx['me']}")
+                f"I have sent {ctx['what']} to stand with you - "
+                + ("not many, but you will not face them alone." if ctx.get("small", True)
+                   else "hold the walls, you will not face them alone.")
+                + f"\n\n{ctx['me']}")
     return ("Greetings", f"Greetings {ctx.get('to', '')},\n\n{ctx['me']}")
 
 
