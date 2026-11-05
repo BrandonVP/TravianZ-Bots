@@ -8,6 +8,7 @@ Environment:
   TRAVBOT_PLAN_MAX_AGE_HOURS  plan.json older than this is ignored (default 6)
   TRAVBOT_MAX_ACTIONS         build orders per village per tick at most (default 6)
   TRAVBOT_OLLAMA_URL          Ollama for the advisor (default http://192.168.68.87:11434; empty disables)
+  TRAVBOT_MAIL_AI             1 = bots answer players' letters and thank for resources with the model (travbot/mailer.py)
   TRAVBOT_IDLE_URL            idle check (default http://192.168.68.87:8911/idle.json; empty = always-on Ollama server)
   TRAVBOT_ADVISOR_MODELS      comma-separated, tried in order (default gemma4:26b,ornith:9b)
   TRAVBOT_ADVISOR_INTERVAL_MIN  minutes between successful reviews (default 60)
@@ -31,6 +32,7 @@ from .names import display
 from . import plan as planmod
 from . import rules, units, web
 from .advisor import Advisor
+from .mailer import Mailer
 from .client import GameClient, GameError, tile_id
 from .diplomacy import Diplomacy, join_list, template_letter
 from .humans import HumanAllies
@@ -742,6 +744,18 @@ def run_bot(state_dir, args, ready):
 
     bot = Bot(client, tribe, state_dir, int(os.environ.get("TRAVBOT_MAX_ACTIONS", "6")), args.dry_run,
               Diplomacy(state_dir, account["user"], writer))
+    # players' letters + thank-yous for resources, written by the local model (travbot/mailer.py)
+    mailer = None
+    if ollama_url and os.environ.get("TRAVBOT_MAIL_AI", "") == "1" and not args.dry_run:
+        all_bots = []
+        for d in state_dir.parent.glob("state*"):
+            try:
+                all_bots.append(json.loads((d / "bot-account.json").read_text(encoding="utf-8"))["user"])
+            except (OSError, ValueError, KeyError):
+                pass
+        mailer = Mailer(client, account["user"], tribe, state_dir, ollama_url,
+                        [m.strip() for m in os.environ.get("TRAVBOT_ADVISOR_MODELS", "gemma4:26b,ornith:9b").split(",") if m.strip()],
+                        all_bots)
     ready.set()
 
     force_advice = args.advise_now
@@ -764,6 +778,9 @@ def run_bot(state_dir, args, ready):
         except Exception as e:  # one account's failure must not stop its thread (or the other bots)
             log.exception("tick failed: %s", e)
             sleep = ERROR_SLEEP
+
+        if mailer and status:
+            mailer.tick()
 
         if advisor and status and not args.dry_run:
             try:
