@@ -9,6 +9,7 @@ Environment:
   TRAVBOT_MAX_ACTIONS         build orders per village per tick at most (default 6)
   TRAVBOT_OLLAMA_URL          Ollama for the advisor (default http://192.168.68.87:11434; empty disables)
   TRAVBOT_MAIL_AI             1 = bots answer players' letters and thank for resources with the model (travbot/mailer.py)
+  TRAVBOT_MAIL_MODELS         models for letters (default: TRAVBOT_ADVISOR_MODELS) - a small fast one is enough
   TRAVBOT_IDLE_URL            idle check (default http://192.168.68.87:8911/idle.json; empty = always-on Ollama server)
   TRAVBOT_ADVISOR_MODELS      comma-separated, tried in order (default gemma4:26b,ornith:9b)
   TRAVBOT_ADVISOR_INTERVAL_MIN  minutes between successful reviews (default 60)
@@ -753,9 +754,9 @@ def run_bot(state_dir, args, ready):
                 all_bots.append(json.loads((d / "bot-account.json").read_text(encoding="utf-8"))["user"])
             except (OSError, ValueError, KeyError):
                 pass
+        mail_models = os.environ.get("TRAVBOT_MAIL_MODELS") or os.environ.get("TRAVBOT_ADVISOR_MODELS", "gemma4:26b,ornith:9b")
         mailer = Mailer(client, account["user"], tribe, state_dir, ollama_url,
-                        [m.strip() for m in os.environ.get("TRAVBOT_ADVISOR_MODELS", "gemma4:26b,ornith:9b").split(",") if m.strip()],
-                        all_bots)
+                        [m.strip() for m in mail_models.split(",") if m.strip()], all_bots)
     ready.set()
 
     force_advice = args.advise_now
