@@ -9,6 +9,7 @@ Sentry's password - never the player's own password) and:
      (REACT_MIN_S..REACT_MAX_S); an attack that lands inside that delay is not dodged,
   2. once the delay has passed, sends every unit at home (champion included) as a reinforcement to the nearest
      safe village from a=status (own villages first, then alliance members'),
+  2b. sends what the free merchants can carry to the nearest safe own village (resources out of raiders' reach),
   3. after the attack has landed, sends exactly those units back home (send back, c=8),
   4. writes each step to the player's Sentry log (a=log).
 
@@ -39,6 +40,7 @@ LEAVE_MARGIN_S = 30       # don't start a dodge this close to the arrival
 RETURN_AFTER_S = 90       # send the army home this long after the attack has landed
 SAFE_GAP_S = 10 * 60      # a target village counts as unsafe if an attack lands there within this gap of ours
 FORGET_S = 3 * 86400      # drop finished entries from state.json after this long
+MIN_HIDE = 500            # not worth a merchant trip below this many resources
 
 
 def _distance(a, b):
@@ -193,33 +195,63 @@ class Sentry:
             if not any(i["id"] == e["move"] for i in v["incoming"]):
                 e["done"] = "gone"   # recalled by the attacker, or already handled
                 continue
-            units = {int(k): n for k, n in v["units"].items() if n > 0}
-            if not units:
-                e["done"] = "nothing home"
-                continue
-            target = self._safe_target(st, villages, v["wref"], e["arrival"])
-            if target is None:
-                e["done"] = "nowhere to go"
-                c.note("stay", f"A {e['type']} on {v['name']} is coming, but there is no safe village to move "
-                               f"the army to. It stays at home.")
-                continue
-            total = sum(units.values())
-            if self.dry_run:
-                log.info("[dry run] %s: would move %d troops %s -> %s", tag, total, v["name"], target["name"])
-                e["done"] = "dry run"
-                continue
-            c.select_village(v["wref"])
-            ok = c.send_troops(target["x"], target["y"], 2, units)
-            if not ok:
-                e["done"] = "refused"
-                log.warning("%s: the game refused the move %s -> %s", tag, v["name"], target["name"])
-                continue
-            e["done"] = "moved"
-            self.state["away"].append({"username": tag, "home": v["wref"], "home_name": v["name"], "at": target["wref"],
-                                       "at_name": target["name"], "units": units, "return_at": e["arrival"] + RETURN_AFTER_S})
-            c.note("dodge", f"A {e['type']} on {v['name']} lands in {_mins(e['arrival'] - now)}: moved {total} troops "
-                            f"to {target['name']} ({target['x']}|{target['y']}). They come home after the attack.")
-            log.info("%s: moved %d troops %s -> %s", tag, total, v["name"], target["name"])
+            troops = self._move_troops(c, tag, st, villages, v, e, now)
+            hidden = self._hide_resources(c, tag, st, villages, v, e)
+            e["done"] = troops if troops != "nothing home" or not hidden else "hid resources"
+
+    def _move_troops(self, c, tag, st, villages, v, e, now):
+        units = {int(k): n for k, n in v["units"].items() if n > 0}
+        if not units:
+            return "nothing home"
+        target = self._safe_target(st, villages, v["wref"], e["arrival"])
+        if target is None:
+            c.note("stay", f"A {e['type']} on {v['name']} is coming, but there is no safe village to move "
+                           f"the army to. It stays at home.")
+            return "nowhere to go"
+        total = sum(units.values())
+        if self.dry_run:
+            log.info("[dry run] %s: would move %d troops %s -> %s", tag, total, v["name"], target["name"])
+            return "dry run"
+        c.select_village(v["wref"])
+        if not c.send_troops(target["x"], target["y"], 2, units):
+            log.warning("%s: the game refused the move %s -> %s", tag, v["name"], target["name"])
+            return "refused"
+        self.state["away"].append({"username": tag, "home": v["wref"], "home_name": v["name"], "at": target["wref"],
+                                   "at_name": target["name"], "units": units, "return_at": e["arrival"] + RETURN_AFTER_S})
+        c.note("dodge", f"A {e['type']} on {v['name']} lands in {_mins(e['arrival'] - now)}: moved {total} troops "
+                        f"to {target['name']} ({target['x']}|{target['y']}). They come home after the attack.")
+        log.info("%s: moved %d troops %s -> %s", tag, total, v["name"], target["name"])
+        return "moved"
+
+    def _hide_resources(self, c, tag, st, villages, v, e):
+        """Send what the free merchants can carry to the nearest safe OWN village (the game refuses anyone
+        else's). Split in proportion to what the village holds. True if a shipment left."""
+        res = {k: int(n) for k, n in (v.get("res") or {}).items()}
+        if not v.get("market") or sum(res.values()) < MIN_HIDE:
+            return False
+        own = [t for t in st["targets"] if t["own"]]
+        target = self._safe_target(dict(st, targets=own), villages, v["wref"], e["arrival"])
+        if target is None:
+            return False
+        if self.dry_run:
+            log.info("[dry run] %s: would hide resources %s -> %s", tag, v["name"], target["name"])
+            return True
+        c.select_village(v["wref"])
+        m = c.market(v["market"])
+        if not m or not m["merchants"] or not m["carry"]:
+            return False
+        cap = m["merchants"] * m["carry"]
+        total = sum(res.values())
+        share = min(1.0, cap / total)
+        amounts = {k: int(n * share) for k, n in res.items()}
+        sent = sum(amounts.values())
+        if sent < MIN_HIDE or not c.send_resources(v["market"], target["x"], target["y"], amounts):
+            log.warning("%s: could not hide resources %s -> %s", tag, v["name"], target["name"])
+            return False
+        c.note("hide", f"Sent {sent:,} resources from {v['name']} to {target['name']} with {m['merchants']} "
+                       f"merchant{'s' if m['merchants'] != 1 else ''}, out of the raiders' reach.")
+        log.info("%s: hid %d resources %s -> %s", tag, sent, v["name"], target["name"])
+        return True
 
     def bring_home(self, c, tag, st, villages, now):
         keep = []
