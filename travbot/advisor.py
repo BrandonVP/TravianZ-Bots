@@ -4,6 +4,7 @@ Everything here is best-effort. Any failure (PC off, user busy, model error, bad
 just means no new plan this time; the rules engine keeps using the last plan or the default.
 """
 import json
+import random
 import logging
 import time
 
@@ -310,11 +311,17 @@ class Advisor:
                 log.warning("advisor model %s failed: %s", model, e)
                 continue
             clean = planmod.validate(raw)
+            # the never-raid list can only grow: a model once dropped the bots' own names from it
+            old_ex = list(((current_plan or {}).get("raid") or {}).get("exclude") or [])
+            new_ex = list((clean.get("raid") or {}).get("exclude") or [])
+            if "raid" in clean:
+                clean["raid"]["exclude"] = new_ex + [x for x in old_ex if x not in new_ex]
             clean.update(created=int(time.time()), source=f"llm:{model}", notes=str(raw.get("notes", ""))[:500])
             tmp = self.plan_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(clean, indent=2), encoding="utf-8")
             tmp.replace(self.plan_file)
-            st["last_success"] = time.time()
+            # a little random spread so bots restarted together don't all ask the model at the same moment again
+            st["last_success"] = time.time() - random.uniform(0, 0.25 * self.interval_s)
             st["last_model"] = model
             self._save_state(st)
             return f"advisor: new plan from {model} in {time.time() - started:.0f}s: {clean['notes']}"
