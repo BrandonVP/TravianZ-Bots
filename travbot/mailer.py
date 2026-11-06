@@ -116,6 +116,37 @@ class Mailer:
         except (OSError, ValueError):
             return None
 
+    def _facts(self):
+        """What the bot really has, from the status.json its own loop writes every round."""
+        try:
+            st = json.loads((self.state_dir / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        lines, needs = [], []
+        for v in st.get("villages") or []:
+            res = v.get("resources") or {}
+            x, y = (v.get("coords") or [None, None])[:2]
+            parts, fills = [], {}
+            for k in ("wood", "clay", "iron", "crop"):
+                r = res.get(k) or {}
+                amt, cap, prod = int(r.get("amount", 0)), int(r.get("cap", 0) or 1), int(r.get("prod", 0))
+                fills[k] = amt / cap
+                parts.append(f"{k} {amt:,}/{cap:,} ({prod:+,}/h)")
+            size = sum(int(f.get("level", 0)) for f in (v.get("fields") or []))
+            build = (v.get("queue") or [{}])[0].get("name")
+            lines.append(f"- {v.get('name')} ({x}|{y}), fields total level {size}: " + ", ".join(parts)
+                         + (f"; building {build}" if build else ""))
+            low = min(fills, key=fills.get) if fills else None
+            needs.append((size, sum(fills.values()) / max(1, len(fills)), v.get("name"), x, y, low))  # youngest first
+        if not lines:
+            return ""
+        needs.sort()
+        size, avg, name, x, y, low = needs[0]
+        nl = chr(10)
+        return ("Your villages right now (resources: amount/storage, production per hour):" + nl + nl.join(lines)
+                + nl + f"The village that would benefit most from help is your youngest: {name} ({x}|{y}), lowest on {low}. "
+                  "If a player offers resources, that is where they should send them." + nl)
+
     def _write(self, task):
         ally = self._alliance()
         who = (f"You are {self.me}, a ruler of the {TRIBES.get(self.tribe, 'a tribe')} in Empires of Rome, a Roman-era "
@@ -124,16 +155,19 @@ class Mailer:
                  "villages (at most about an hour of your production a day) and troops to defend members' villages near "
                  "yours. You never promise attacks, gold, exact amounts or dates. If asked for something else, answer "
                  "kindly and vaguely. Never mention being a bot, AI or a program. ")
-        style = f"Write in English, in character, friendly and short (under 500 characters). Sign exactly as {self.me}."
+        style = (f"Answer the player's actual question first, directly and concretely, using ONLY the facts above: "
+                 f"if they ask which village or what resource, name it exactly with its coordinates. Never invent "
+                 f"village names, places, numbers or people. If the facts don't answer the question, say so honestly. "
+                 f"Then stay in character: friendly, plain English, under 500 characters, no lists. Sign exactly as {self.me}.")
         for model in self.models:
             try:
-                r = requests.post(f"{self.ollama}/api/chat", timeout=180, json={
+                r = requests.post(f"{self.ollama}/api/chat", timeout=420, json={
                     "model": model, "stream": False, "think": False, "format": REPLY_SCHEMA, "keep_alive": "10m",
                     "options": {"temperature": 0.7, "num_ctx": 2048, "num_predict": 600},
-                    "messages": [{"role": "system", "content": who + facts + style},
+                    "messages": [{"role": "system", "content": who + facts + self._facts() + style},
                                  {"role": "user", "content": task}]})
                 r.raise_for_status()
-                text = str(json.loads(r.json()["message"]["content"])["text"]).strip()
+                text = str(json.loads(r.json()["message"]["content"])["text"]).strip().strip('{}"').strip()
                 if 20 <= len(text) <= 1500:
                     return text
             except (requests.RequestException, ValueError, KeyError) as e:
