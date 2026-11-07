@@ -10,6 +10,11 @@ import time
 
 log = logging.getLogger(__name__)
 
+# Buildings that stop below level 20 (game data, GameEngine/Data/buidata.php). The advisor model
+# asked for Sawmill 20 / Bakery 16 on 2026-11-07; a target above the cap would sit in the candidate
+# list forever and crowd out real targets.
+MAX_LEVEL = {"Sawmill": 5, "Brickyard": 5, "Iron Foundry": 5, "Grain Mill": 5, "Bakery": 5, "Brewery": 10}
+
 DEFAULT_PLAN = {
     # relative priority of each resource when choosing which field to upgrade
     "resource_weights": {"wood": 1.0, "clay": 1.0, "iron": 1.0, "crop": 0.8},
@@ -176,7 +181,7 @@ def validate(raw):
     targets = raw.get("building_targets")
     if isinstance(targets, list):
         from .names import canon  # the advisor answers with the game's current names
-        clean = [{"name": canon(t["name"]), "level": int(t["level"])}
+        clean = [{"name": canon(t["name"]), "level": min(int(t["level"]), MAX_LEVEL.get(canon(t["name"]), 20))}
                  for t in targets
                  if isinstance(t, dict) and isinstance(t.get("name"), str) and t["name"].strip()
                  and isinstance(t.get("level"), int) and not isinstance(t.get("level"), bool)

@@ -119,6 +119,10 @@ You do not act directly. You write a plan that a rules engine follows until your
   a donor never drops below donor_keep_share (0-0.95) of its storage; shipments under min_shipment are skipped.
   share.allies (true/false) also ships to young villages of the allied bots (same alliance), the donor keeping
   at least ally_keep_share (0-0.95) of its storage. Merchants (one per Marketplace level) each carry a lot on this server, so more Marketplace levels = bigger shipments.
+  Marketplace levels do nothing else (no production, no gold).
+
+Maximum levels: Sawmill, Brickyard, Iron Foundry, Grain Mill and Bakery stop at level 5 (each adds 5% per
+level, 25% at most). Every other building in the list goes to 20.
 
 Construction requirements (a building cannot be started before these are met; the bot skips such targets):
 - Warehouse, Granary, Embassy: Main Building 1. Cranny, Rally Point, Palisade: none.
@@ -132,7 +136,8 @@ Guidance: balanced fields early; keep net crop comfortably positive because buil
 upkeep; Main Building levels speed up all construction; a Cranny hides resources from raids; keep a modest
 defence early and raise it if attacks were seen; expansion is a long-term goal once the economy is solid
 and is limited by culture points (every building level adds some).
-Gold: each village produces gold (more with Main Building and Marketplace levels). Raids can steal gold that
+Gold: only Gold Mines produce gold (resource fields 45/46 in some villages; the bot levels them with the
+fields). Main Building and Marketplace levels do not add gold. Raids can steal gold that
 is not protected by a Treasury (needs Main Building 10; it holds 1/10 of a Warehouse of the same level). The bot
 spends gold on Finish now (see "gold"); a village's gold stops growing at its cap (8,000 without a Treasury).
 Put a short explanation (max 3 sentences) in "notes"."""
