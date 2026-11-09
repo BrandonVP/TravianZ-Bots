@@ -797,6 +797,25 @@ def run_bot(state_dir, args, ready):
         time.sleep(sleep)
 
 
+def _restart_watcher(flag):
+    """Restart without TrueNAS: when the file RESTART appears next to the code (bot/RESTART on the share), delete it
+    and exit; Docker's restart policy starts the container again with fresh code. Only exits if the file could be
+    deleted, so a stuck file can never cause a restart loop."""
+    warned = False
+    while True:
+        try:
+            if flag.exists():
+                flag.unlink()
+                log.info("RESTART file found - exiting so Docker restarts the bot with fresh code")
+                logging.shutdown()
+                os._exit(0)
+        except OSError as e:
+            if not warned:
+                log.error("RESTART file found but could not be deleted (%s) - not restarting", e)
+                warned = True
+        time.sleep(5)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="run a single tick and exit")
@@ -808,6 +827,8 @@ def main():
     primary = pathlib.Path(os.environ.get("TRAVBOT_STATE_DIR", "state")).resolve()
     primary.mkdir(parents=True, exist_ok=True)
     setup_logging()
+    if not args.once:
+        threading.Thread(target=_restart_watcher, args=(primary.parent / "RESTART",), name="restart-watch", daemon=True).start()
     dirs = discover_state_dirs(primary)
     if args.only:
         dirs = [d for d in dirs if d.name == args.only]
