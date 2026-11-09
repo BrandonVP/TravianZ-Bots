@@ -246,7 +246,10 @@ def parse_construct_page(html):
             href = el.get("href") if el.name == "a" else None
             if href and _CONSTRUCT.search(href) and entry["href"] is None:
                 entry["href"] = href.replace("&amp;", "&")
-        options[name] = entry
+        # the game can list a building twice (built-now entry, then again under "soon" without a
+        # link): keep the entry we can act on, or the later one hides it (the Bakery never got built)
+        if name not in options or (entry["href"] and not options[name]["href"]):
+            options[name] = entry
     return options
 
 
