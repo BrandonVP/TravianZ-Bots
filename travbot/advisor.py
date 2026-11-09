@@ -91,8 +91,9 @@ applied to every village the bot owns.
 You do not act directly. You write a plan that a rules engine follows until your next review (about an hour):
 - resource_weights (0-10 each): higher = the bot upgrades that resource's fields sooner. The bot picks the
   resource with the lowest production divided by its weight.
-- field_max_level (1-20): fields are not upgraded past this level (every village on this server can reach 20;
-  levels above 10 get expensive quickly).
+- field_max_level (1-25): fields are not upgraded past this level (every village on this server can reach 25;
+  levels above 10 get expensive quickly). A village that has reached it, has no building targets left and is
+  more than half full keeps upgrading fields anyway, so a low value never leaves resources unused.
 - min_net_crop: if net crop per hour (after upkeep) drops below this, the bot upgrades cropland first.
 - storage_buffer_hours: the bot grows the Warehouse/Granary when a resource would fill up within this many hours.
 - save_up_hours (0-24): the bot saves resources for its top-priority item if that becomes affordable within this

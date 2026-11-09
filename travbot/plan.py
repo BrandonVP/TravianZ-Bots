@@ -172,7 +172,7 @@ def validate(raw):
             if v is not None:
                 plan["resource_weights"][k] = v
 
-    for key, lo, hi, cast in (("field_max_level", 1, 20, int), ("min_net_crop", 0, 1000, int),
+    for key, lo, hi, cast in (("field_max_level", 1, 25, int), ("min_net_crop", 0, 1000, int),
                               ("storage_buffer_hours", 0.5, 48, float), ("save_up_hours", 0, 24, float)):
         v = _num(raw, key, lo, hi, cast)
         if v is not None:

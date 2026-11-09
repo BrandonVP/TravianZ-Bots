@@ -10,6 +10,8 @@ INNER_SLOTS = list(range(19, 39)) + list(range(41, 45))   # 41-44: extra buildin
 # servers with archers: the skirmisher needs Academy 5 + Archery Range 5 (Barracks 3 for the Range)
 ARCHERY_TARGETS = (("Barracks", 3), ("Academy", 5), ("Archery Range", 5))
 CANDIDATES_PER_CATEGORY = 3
+FIELD_LEVEL_CAP = 25          # resource fields go to 25 in every village on this server
+SPARE_FILL = 0.5              # a village with nothing left to build and storage this full keeps growing fields
 # Building targets can be blocked by requirements (the game offers no link), so look
 # further down the list before giving up on this tick.
 BUILDING_CANDIDATES = 6
@@ -56,6 +58,15 @@ def field_candidates(state, plan):
                  "reason": f"gold mine level {f['level']} behind the resource fields"}
                 for f in mines[:CANDIDATES_PER_CATEGORY]]
 
+    # the plan's field_max_level is one number for every village; a strong village that has reached it
+    # and has nothing left to build would just fill up (the capitals sat at 80% with an empty queue).
+    # Then spare resources go into fields up to the game's cap.
+    spare = ""
+    if not fields and _has_spare(state, plan):
+        fields = [f for f in state["fields"] if f["slot"] not in queued and f["kind"] != "gold"
+                  and f["level"] < FIELD_LEVEL_CAP]
+        spare = ", spare resources"
+
     weights = plan["resource_weights"]
 
     def score(f):
@@ -64,8 +75,15 @@ def field_candidates(state, plan):
 
     fields = sorted((f for f in fields if weights[f["kind"]] > 0), key=score)
     return [{"action": "upgrade", "slot": f["slot"], "name": f["kind"] + " field",
-             "reason": f"{f['kind']} production {res[f['kind']]['prod']}/h, field level {f['level']}"}
+             "reason": f"{f['kind']} production {res[f['kind']]['prod']}/h, field level {f['level']}{spare}"}
             for f in fields[:CANDIDATES_PER_CATEGORY]]
+
+
+def _has_spare(state, plan):
+    """Storage on average at least SPARE_FILL full and no building left to work on."""
+    res = state["resources"]
+    fill = sum(res[k]["amount"] / max(res[k]["cap"], 1) for k in ("wood", "clay", "iron", "crop")) / 4
+    return fill >= SPARE_FILL and not building_candidates(state, plan)
 
 
 def _free_slot(name, buildings):
