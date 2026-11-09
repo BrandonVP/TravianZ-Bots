@@ -50,7 +50,7 @@ PLAN_SCHEMA = {
             "properties": {"unit_target": {"type": "integer"}, "budget_share": {"type": "number"},
                            "emergency_share": {"type": "number"}, "reinforce": {"type": "boolean"},
                            "reinforce_keep": {"type": "integer"}, "reinforce_share": {"type": "number"},
-                           "reinforce_radius": {"type": "integer"}},
+                           "reinforce_radius": {"type": "integer", "minimum": 25, "maximum": 50}},
             "required": ["unit_target", "budget_share", "emergency_share"],
         },
         "expansion": {
@@ -103,7 +103,8 @@ You do not act directly. You write a plan that a rules engine follows until your
 - defense.unit_target: Phalanxes to keep in each village (0-1000). Each costs 100 wood, 130 clay, 55 iron,
   30 crop and 1 crop/h upkeep. defense.budget_share (0-0.9): share of resources the bot may spend on them per
   round; defense.emergency_share (0-1): share it may spend while an attack is incoming.
-  defense.reinforce (true/false): villages within reinforce_radius tiles (1-50) send reinforcements to own or
+  defense.reinforce (true/false): villages within reinforce_radius tiles (25-50; keep it wide - new players spawn
+  further from the centre as the world ages) send reinforcements to own or
   allied villages with an incoming attack: reinforce_share (0-1) of their defenders above reinforce_keep (always
   stay home); villages that are attacked themselves never send.
 - expansion: enabled (true/false); max_villages; search_radius (tiles, 2-15) for free valleys; min_crop_fields

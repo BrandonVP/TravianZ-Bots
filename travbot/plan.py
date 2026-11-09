@@ -57,7 +57,7 @@ DEFAULT_PLAN = {
         # share of the defenders above reinforce_keep that may go, per attacked village
         "reinforce_share": 0.5,
         # only villages within this many tiles of the attacked one send help
-        "reinforce_radius": 15,
+        "reinforce_radius": 30,   # new players spawn further out as the world ages (about 2.4 x days at 3x); 15 missed them after day 10
         # also reinforce human alliance members (humans.py), with a note to them
         "reinforce_humans": True,
         # Archery Range skirmishers (anti-archer defence) to keep in each village. Only on
@@ -196,7 +196,7 @@ def validate(raw):
                 plan["defense"][key] = defense[key]
         for key, lo, hi, cast in (("unit_target", 0, 1000, int), ("budget_share", 0, 0.9, float),
                                   ("emergency_share", 0, 1, float), ("reinforce_keep", 0, 1000, int),
-                                  ("reinforce_share", 0, 1, float), ("reinforce_radius", 1, 50, int),
+                                  ("reinforce_share", 0, 1, float), ("reinforce_radius", 25, 50, int),
                                   ("ranged_target", 0, 1000, int)):
             v = _num(defense, key, lo, hi, cast)
             if v is not None:
