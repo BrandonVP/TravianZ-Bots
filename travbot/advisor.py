@@ -203,7 +203,8 @@ LETTER_SCHEMA = {
 
 
 class Advisor:
-    def __init__(self, ollama_url, idle_url, models, state_dir, interval_s, retry_s, timeout_s=600, tribe=3):
+    def __init__(self, ollama_url, idle_url, models, state_dir, interval_s, retry_s, timeout_s=600, tribe=3,
+                 yield_to_others=True):
         self.ollama = ollama_url.rstrip("/")
         self.idle_url = idle_url
         self.models = models
@@ -213,6 +214,7 @@ class Advisor:
         self.retry_s = retry_s
         self.timeout_s = timeout_s
         self.tribe = tribe
+        self.yield_to_others = yield_to_others  # False = shared Ollama server: ask anyway, Ollama queues/swaps models
 
     def _load_state(self):
         try:
@@ -238,7 +240,7 @@ class Advisor:
         except (requests.RequestException, ValueError) as e:
             return False, f"Ollama unreachable ({type(e).__name__})"
         others = [m for m in loaded if m not in self.models]
-        if others:
+        if others and self.yield_to_others:
             # someone (e.g. the work laptop) used another model in the last few minutes
             return False, "Ollama in use: " + ", ".join(others)
         return True, "idle"

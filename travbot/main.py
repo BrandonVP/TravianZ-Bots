@@ -11,6 +11,7 @@ Environment:
   TRAVBOT_MAIL_AI             1 = bots answer players' letters and thank for resources with the model (travbot/mailer.py)
   TRAVBOT_MAIL_MODELS         models for letters (default: TRAVBOT_ADVISOR_MODELS) - a small fast one is enough
   TRAVBOT_IDLE_URL            idle check (default http://192.168.68.87:8911/idle.json; empty = always-on Ollama server)
+  TRAVBOT_OLLAMA_YIELD        1 = skip a review while Ollama has another model loaded (default); 0 = shared server, just ask
   TRAVBOT_ADVISOR_MODELS      comma-separated, tried in order (default gemma4:26b,ornith:9b)
   TRAVBOT_ADVISOR_INTERVAL_MIN  minutes between successful reviews (default 60)
   TRAVBOT_ADVISOR_RETRY_MIN     minutes between attempts while the PC is busy (default 10)
@@ -731,6 +732,7 @@ def run_bot(state_dir, args, ready):
             state_dir,
             interval_s=60 * float(os.environ.get("TRAVBOT_ADVISOR_INTERVAL_MIN", "60")),
             retry_s=60 * float(os.environ.get("TRAVBOT_ADVISOR_RETRY_MIN", "10")),
+            yield_to_others=os.environ.get("TRAVBOT_OLLAMA_YIELD", "1") != "0",
             tribe=tribe,
         )
 
