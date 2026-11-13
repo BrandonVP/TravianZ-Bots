@@ -11,3 +11,4 @@ venv/
 # the Sentry (AI sitter): key + password per server, and its runtime state - never committed
 sentry/
 RESTART
+hostiles.json
