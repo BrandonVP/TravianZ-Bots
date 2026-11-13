@@ -54,6 +54,7 @@ log = logging.getLogger("travbot")
 MIN_SLEEP, MAX_SLEEP, IDLE_SLEEP, ERROR_SLEEP = 60, 15 * 60, 10 * 60, 120
 ATTACK_SLEEP = 120  # check more often while an attack is incoming
 REINFORCE_COOLDOWN_S = 3600  # one round of help per attacked village per hour
+REINFORCE_NOTE_S = 6 * 3600   # the "help is on the way" letter: once per attacked village per 6 hours
 ALLY_STATUS_MAX_AGE_S = 2 * 3600  # ignore an allied bot's status.json older than this
 
 
@@ -365,6 +366,7 @@ class Bot:
             key = f"{tx}|{ty}"
             if now - sent.get(key, 0) < REINFORCE_COOLDOWN_S:
                 continue
+            sent_here = {}   # unit name -> count sent to this target this round (one letter for all villages)
             for v in villages:
                 c = self.coords.get(v["id"])
                 if not c or tuple(c) == (tx, ty) or v["state"]["incoming"]["attacks"]:
@@ -395,13 +397,21 @@ class Bot:
                     log.info("[%s] the game refused the reinforcement to %s", v["name"], t["name"])
                     continue
                 sent[key] = now
-                try:
-                    self.humans.note_reinforcement(self.client, t, what, self.client.user, self.dry_run,
-                                                   count + sum(extra.values()))
-                except (requests.RequestException, GameError) as e:
-                    log.warning("could not write to %s: %s", t.get("human"), e)
+                if count > 0:
+                    sent_here[units.name(unit)] = sent_here.get(units.name(unit), 0) + count
+                for n in extra.values():
+                    sent_here[units.name(skirm)] = sent_here.get(units.name(skirm), 0) + n
                 actions.append({"action": "reinforce", "name": f"{what} to {t['name']}",
                                 "slot": 39, "reason": "attack incoming", "village": v["name"], "time": int(now)})
+            if sent_here and now - sent.get(f"note:{key}", 0) >= REINFORCE_NOTE_S:
+                # one letter per target, after every village has sent (was one letter per sending village),
+                # and not again for the next waves of the same attack
+                sent[f"note:{key}"] = now
+                try:
+                    self.humans.note_reinforcement(self.client, t, join_list([f"{n} {u}" for u, n in sent_here.items()]),
+                                                   self.client.user, self.dry_run, sum(sent_here.values()))
+                except (requests.RequestException, GameError) as e:
+                    log.warning("could not write to %s: %s", t.get("human"), e)
         if not self.dry_run:
             write_json(path, {k: ts for k, ts in sent.items() if now - ts < 24 * 3600})
         return actions
