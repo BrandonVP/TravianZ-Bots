@@ -349,7 +349,13 @@ def parse_own_uid(html):
 
 def parse_capital(html):
     """Village id (wref) of the capital from a profile page's village list, or None."""
-    table = _soup(html).find("table", id="villages")
+    soup = _soup(html)
+    for div in soup.select("div.tz-prof-vname"):   # redesigned profile: a "Capital" tag next to the village link
+        if any(t.get_text(strip=True).lower() == "capital" for t in div.select("span.tz-ally-role")):
+            link = div.find("a", href=re.compile(r"karte\.php\?d=\d+"))
+            if link:
+                return int(re.search(r"d=(\d+)", link["href"]).group(1))
+    table = soup.find("table", id="villages")
     if table is None:
         return None
     for td in table.find_all("td", class_="nam"):
@@ -369,9 +375,9 @@ def parse_market(html):
     if soup.find("input", attrs={"name": "ft", "value": "check"}) is None:
         return None
     mer = soup.find("td", class_="mer")
-    nums = _ints(mer.get_text(" ", strip=True)) if mer else []
-    carry = 0
-    for p in soup.find_all("p"):
+    nums = _ints(mer.get_text(" ", strip=True).replace(",", "")) if mer else []
+    carry = nums[2] if len(nums) >= 3 else 0   # redesigned page: "Trade carts 20 of 20 free 10,000 each"
+    for p in ([] if carry else soup.find_all("p")):
         if "carry" in p.get_text(" ", strip=True).lower() and p.find("b"):
             carry = (_ints(p.find("b").get_text()) or [0])[0]
             break
@@ -568,4 +574,98 @@ def parse_report(html):
         out["defenders"] += sum(num(c) for c in dtroops)
     if unknown:
         out["defenders"] = None
+    return out
+
+
+# --- army, intel and requests (plan 2026-11-13-smarter-bots) ----------------------------------
+
+def parse_report_detail(html):
+    """parse_report() plus who attacked and what the defenders had, for reports of attacks ON the bot and for
+    scouting results: {"attacker_uid", "attacker_wref", "def_troops": {uid: n} (None if hidden),
+    "info": text of the scout information row or ""} merged into parse_report()'s dict."""
+    base = parse_report(html)
+    if base is None:
+        return None
+    soup = _soup(html)
+    att = soup.find("table", id="attacker")
+    head = att.find("thead") if att else None
+    uid = head.find("a", href=re.compile(r"spieler\.php\?uid=\d+")) if head else None
+    vil = head.find("a", href=re.compile(r"karte\.php\?d=\d+")) if head else None
+    base["attacker_uid"] = int(re.search(r"uid=(\d+)", uid["href"]).group(1)) if uid else None
+    base["attacker_wref"] = int(re.search(r"d=(\d+)", vil["href"]).group(1)) if vil else None
+    troops, hidden = {}, False
+    for d in soup.find_all("table", class_="defender"):
+        ids, dtroops, _ = _report_rows(d)
+        for i, u in enumerate(ids):
+            if i < len(dtroops):
+                if dtroops[i] == "?":
+                    hidden = True
+                elif dtroops[i].isdigit() and int(dtroops[i]):
+                    troops[u] = troops.get(u, 0) + int(dtroops[i])
+    base["def_troops"] = None if hidden else troops
+    info = ""
+    for th in soup.select("tbody.goods th"):
+        if th.get_text(strip=True).lower().startswith("information"):
+            td = th.find_next_sibling("td")
+            info = td.get_text(" ", strip=True) if td else ""
+    base["info"] = info
+    return base
+
+
+def parse_travel_time(html):
+    """a2b confirmation page: travel time in seconds ("in H:MM:SS"), or None."""
+    el = _soup(html).select_one("tbody.infos div.in")
+    if el is None:
+        return None
+    m = re.search(r"(\d+):(\d{2}):(\d{2})", el.get_text())
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) if m else None
+
+
+def parse_champion_option(html):
+    """a2b send form: the value of the first champion that can go along (select name=champ), or None."""
+    sel = _soup(html).find("select", attrs={"name": "champ"})
+    if sel is None:
+        return None
+    for opt in sel.find_all("option"):
+        v = (opt.get("value") or "").strip()
+        if v and v != "0":
+            return v
+    return None
+
+
+def parse_upgrades(html):
+    """Blacksmith/Armoury page: {unit_id: {"level": n (incl. queued), "href": upgrade link or None}}."""
+    out = {}
+    for tr in _soup(html).find_all("tr"):
+        img = tr.find("img", class_="unit")
+        if img is None:
+            continue
+        m = _UNIT_CLASS.search(" ".join(img.get("class", [])))
+        if not m:
+            continue
+        lv = re.search(r"\(\s*\w+\s+(\d+)(?:\+(\d+))?\s*\)", tr.get_text(" ", strip=True))
+        a = tr.find("a", class_="research")
+        href = (a.get("href") or "").replace("&amp;", "&") if a else None
+        out[int(m.group(1))] = {"level": (int(lv.group(1)) + int(lv.group(2) or 0)) if lv else 0,
+                                "href": href if href and "build.php" in href else None}
+    return out
+
+
+def parse_celebration_running(html):
+    """Town Hall page: True if a celebration is under way in this village."""
+    return _soup(html).select_one("div.tz-fest-card.is-on") is not None
+
+
+def parse_oasis_troops(html):
+    """karte.php tile view of an unoccupied oasis: {animal unit id: count} ({} = empty), or None."""
+    table = _soup(html).find("table", id="troop_info")
+    if table is None:
+        return None
+    out = {}
+    for tr in table.find_all("tr"):
+        img, val = tr.find("img", class_="unit"), tr.find("td", class_="val")
+        m = _UNIT_CLASS.search(" ".join(img.get("class", []))) if img else None
+        n = _ints(val.get_text()) if val else []
+        if m and n and n[0] > 0:
+            out[int(m.group(1))] = n[0]
     return out

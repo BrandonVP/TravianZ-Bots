@@ -21,6 +21,13 @@ Status page: **http://192.168.68.205:8090/** (refreshes every minute; also `/sta
 | `travbot/web.py` | status page |
 | `travbot/main.py` | one thread per account, the loop over its villages |
 | `travbot/diplomacy.py` | alliance: found / invite / accept at the Embassy, letters |
+| `travbot/world.py` | world day ("Days since start") and the playbook phase |
+| `travbot/roles.py` | village roles (capital / army / feeder) and the buildings each needs per phase |
+| `travbot/army.py` | attack army, Academy research, Blacksmith/Armoury upgrades, celebrations, counter-strikes, timed sends |
+| `travbot/intel.py` | the hostile list: who attacked a bot or an alliance member (shared `hostiles.json`) |
+| `travbot/combat.py`, `unitstats.py` | rough battle estimates from the game's unit stats |
+| `travbot/letters.py` | members' letters become requests: resources, defenders, scouts, attacks |
+| `travbot/wonder.py` | resources and troops for members' Wonder and relic villages |
 | `state*/bot-account.json` | bot login (keep private - all `state*` folders are git-ignored) |
 | `state*/diplomacy.json` | alliance role (founder or member) |
 | `state/plan.json` | current plan (from the AI or by hand); AI plans are ignored when older than 6 h, a plan with `"source": "manual ..."` stays in force until replaced |
@@ -89,6 +96,46 @@ The champion is never trained by the bot; a bot without one skips all of this.
 
 The game has the final word: the bot only follows links and forms the game offers.
 
+## Playing to win (plan `Claude/plans/2026-11-13-smarter-bots.md`, decided by Brandon 2026-11-13)
+
+The bots follow a playbook by world phase (`travbot/world.py`, from the game's "Days since start"): opening
+(days 1-4), second village (5-9), growth (10-29), relics (30-49), wonder (50+). The advisor's prompt carries the
+playbook; its plan applies to every village and the village **roles** add their own buildings in front:
+
+- **capital**: cropper, Town Hall, Armoury, wall; **army** (one village, two from 8 villages): Barracks, Stable,
+  Workshop, Academy, Blacksmith, Rally Point, Champion's Hall; **feeders**: Marketplace, Merchants' Guild, Town Hall.
+- **Army** (`army`): attack units kept in the army village (`unit_target` x1 growth, x2 relics, x3 wonder), the
+  tribe's best infantry and cavalry by attack per resource (never the basic defender), rams, catapults from the
+  relics phase, scouts. The Academy researches them; the Blacksmith (attack) and Armoury (defence) upgrade them
+  (account-wide in this game). Town Halls hold celebrations for culture points (`culture`).
+
+**Hostile list and counter-strike** (`counter`, fair-play limits fixed in code, the advisor can't change them):
+every attack or raid on an alliance member (bots included) puts the attacker on the shared hostile list for
+`hostile_days`. The army village scouts the attacker's village, then strikes when the estimate wins with a
+`margin` (1.5): a normal attack with infantry/cavalry and rams, sized to win and to about `size_factor` x what
+the attacker sent. Never catapults or chiefs against humans, never villages under `min_target_pop`, never
+players under beginners protection, at most `per_target_per_day` strikes on a player (all bots) and
+`per_bot_per_day` per bot. Human members who were attacked get a short note. The bots still never raid active
+players.
+
+**Letters become requests** (`requests`, `travbot/letters.py`): for a letter from an alliance member the model
+lists what is asked (resources, reinforce, scout, attack; coordinates and "land at HH:MM" as written). The rules
+check it (member, their own village, hostile or Etruscan target for attacks, `per_member_per_day`), the bot acts
+now or schedules the send so the troops land on time (travel time from the confirmation page), and the reply is
+written afterwards from what was really done. Requested scouting is reported back when the scouts return.
+
+**Wonder and relics** (`wonder`): the humans build the Wonder. When the game's alliance feed marks a member's
+village as holding the Wonder (`ww`) or relics, bot villages ship what they hold above `keep_share` to the
+nearest Wonder and move `troop_share` of their spare defenders into it (doubled from the day the Etruscans attack
+Wonders); relic villages get a smaller garrison. The bots build no Treasury and take no relics themselves.
+
+Game side (dev 2026-11-13): `GameEngine/BotFeed.php` adds `ww`, `ww_level` and `relics` to each village of
+`ajax.php?f=tzbot&a=ally`.
+
+Testing on the dev game (`http://192.168.68.205/dev`, a copy of the world): `devtests/` holds read-only and
+dry-run checks (`probe`, `letters_test`, `strike_test`, `support_advisor_test`), run with the bot-dev folder
+mounted at `/app`.
+
 ## Several bots
 
 Every folder `state-*` next to `state/` that holds a `bot-account.json` is another account, run in its own thread
@@ -106,9 +153,11 @@ written by the local AI model when the advisor PC is idle, otherwise from templa
 
 ## AI advisor
 
-After a round, at most hourly (retry every 10 min while busy): ask `http://192.168.68.87:8911/idle.json`
-(30 s without keyboard/mouse and GPU < 20%), skip if another Ollama model is loaded, then send a summary of
-all villages to `gemma4:26b` (fallback `ornith:9b`) with a JSON schema. The validated reply becomes
+After a round, at most every `TRAVBOT_ADVISOR_INTERVAL_MIN` (live: 240) minutes: with `TRAVBOT_IDLE_URL` set,
+ask that PC whether it is idle; with `TRAVBOT_OLLAMA_YIELD=1` skip while another Ollama model is loaded (live: 0,
+the RTX server is shared). Then send a summary of all villages, the world phase, roles, the hostile list and the
+alliance's Wonder/relic villages to the models in `TRAVBOT_ADVISOR_MODELS` (live: `gemma4:26b,qwen3:14b` on
+the main TrueNAS) with a JSON schema. The validated reply becomes
 `state/plan.json`; the model is unloaded right after answering. Any failure just keeps the current plan.
 
 ## Setup

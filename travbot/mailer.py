@@ -48,6 +48,7 @@ class Mailer:
         self.bots = set(all_bots)
         self.record = self.state_dir.parent / "mail" / "replied.json"
         self.last = 0.0
+        self.requests = None   # travbot.letters.Requests: letters from members become actions (set by main)
 
     # --- record (same format as mail/mailbot.py, plus "seen" first-sighting times) --------------
 
@@ -147,14 +148,18 @@ class Mailer:
                 + nl + f"The village that would benefit most from help is your youngest: {name} ({x}|{y}), lowest on {low}. "
                   "If a player offers resources, that is where they should send them." + nl)
 
-    def _write(self, task):
+    def _write(self, task, done=None):
         ally = self._alliance()
         who = (f"You are {self.me}, a ruler of the {TRIBES.get(self.tribe, 'a tribe')} in Empires of Rome, a Roman-era "
                f"strategy game" + (f", and a leader in the alliance {ally}" if ally else "") + ". ")
-        facts = ("Facts you must not go beyond: you help members of your alliance - small gifts of resources to young "
-                 "villages (at most about an hour of your production a day) and troops to defend members' villages near "
-                 "yours. You never promise attacks, gold, exact amounts or dates. If asked for something else, answer "
-                 "kindly and vaguely. Never mention being a bot, AI or a program. ")
+        facts = ("Facts you must not go beyond: you help members of your alliance - gifts of resources to young "
+                 "villages and on request, troops to defend members' villages near yours, and you strike back at players "
+                 "who attack your alliance. You never promise anything that is not listed under 'What you did', and "
+                 "never gold. If asked for something else, answer kindly and vaguely. Never mention being a bot, AI or "
+                 "a program. ")
+        if done:
+            facts += ("What you did about this letter (tell them plainly and exactly, add nothing): "
+                      + " ".join(done) + " ")
         style = (f"Answer the player's actual question first, directly and concretely, using ONLY the facts above: "
                  f"if they ask which village or what resource, name it exactly with its coordinates. Never invent "
                  f"village names, places, numbers or people. If the facts don't answer the question, say so honestly. "
@@ -231,8 +236,19 @@ class Mailer:
             if not self._due(f"m{m['id']}", now):
                 continue
             body = self._read(m["id"])
+            acts = None
+            if self.requests is not None:
+                acted = self._load().get("acted", {}).get(self.me, {})
+                acts = acted.get(str(m["id"]))
+                if acts is None:   # read the letter's requests and act on them - once, even if the reply fails
+                    reqs = self.requests.read(m["sender"], m["subject"], body)
+                    if reqs is None:
+                        return   # model unavailable: try again next round
+                    acts = self.requests.handle(m["sender"], reqs)
+                    self._update(lambda s, d=acts: s.setdefault("acted", {}).setdefault(self.me, {}).__setitem__(
+                        str(m["id"]), d))
             text = self._write(f'{m["sender"]} wrote you a letter with the subject "{m["subject"]}":\n---\n{body}\n---\n'
-                               f"Write your reply to {m['sender']}.")
+                               f"Write your reply to {m['sender']}.", acts)
             if not text:
                 return   # model unavailable: try again next round
             subj = m["subject"] if m["subject"].lower().startswith("re:") else ("Re: " + m["subject"])[:35]

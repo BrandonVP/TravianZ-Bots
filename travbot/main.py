@@ -41,6 +41,13 @@ from .humans import HumanAllies
 from .expand import Expansion
 from .raid import RaidBook, raider_choices, scout_unit, form_slot, dist as raid_dist
 from .champion import ChampionKeeper
+from .world import WorldClock, NATAR_ATTACK_DAY
+from .intel import Hostiles
+from .army import Army
+from .roles import Roles, overlay
+from .wonder import Support, wonder_villages, relic_villages
+from .letters import Requests
+from .champions import ChampionPlan
 
 log = logging.getLogger("travbot")
 
@@ -128,6 +135,18 @@ class Bot:
         self.champion = ChampionKeeper(client, dry_run)
         self.champion_checked = 0.0
         self.humans = HumanAllies(state_dir)   # human members of the alliance: gifts and defence
+        # plan 2026-11-13-smarter-bots: world phase, village roles, army, hostile list, Wonder/relic support
+        self.world = WorldClock()
+        self.day, self.phase = None, "growth"
+        self.hostiles = Hostiles(state_dir)
+        self.army = Army(client, tribe, state_dir, self.hostiles, dry_run)
+        self.roles = Roles(state_dir)
+        self.role_of = {}          # village id -> capital / army / feeder
+        self.support = Support(client, tribe, state_dir, dry_run)
+        self.champions = ChampionPlan(client, tribe, state_dir, dry_run)   # war / steward / guardian
+        self.champ_extra = {}      # units the army village keeps so the next champion can be made
+        self.last_seen = []        # last round's villages with their state (for letters / requests)
+        self.last_plan = None
 
     def _act(self, cand, href, actions, label):
         from .names import display, display_text
@@ -254,6 +273,15 @@ class Bot:
             return []
         richest = max(rules.total_production(v["state"]) for v in villages)
         young = [v for v in villages if rules.is_young(v["state"], richest, sp) and v["x"] is not None]
+        # playbook: feeders supply the army village(s) once the army is being built (growth phase on)
+        if self.phase in ("growth", "relics", "wonder"):
+            for v in villages:
+                st = v["state"]
+                fill = sum(st["resources"][k]["amount"] / max(1, st["resources"][k]["cap"])
+                           for k in ("wood", "clay", "iron", "crop")) / 4
+                if self.role_of.get(v["id"]) == "army" and v not in young and v["x"] is not None \
+                        and not st["incoming"]["attacks"] and fill < sp["fill_to"] * 0.5:
+                    young.append(v)
         donors = sorted((v for v in villages if v not in young and rules.find_slot(v["state"], "Marketplace")),
                         key=lambda v: -rules.total_production(v["state"]))
         if sp["allies"]:  # young villages of the allied bots (not while they are being attacked)
@@ -284,10 +312,11 @@ class Bot:
                                       (d.get("reserved") or {}).get("cost"))
                 if not ship:
                     continue
-                log.info("[%s] %ssend %s to %s (%s|%s): young %s", d["name"],
+                log.info("[%s] %ssend %s to %s (%s|%s): %s", d["name"],
                          "[dry-run] " if self.dry_run else "",
                          ", ".join(f"{k} {n}" for k, n in ship.items() if n), r["name"], r["x"], r["y"],
-                         "allied village" if r.get("ally") else "village")
+                         "young allied village" if r.get("ally") else
+                         "army village" if self.role_of.get(r["id"]) == "army" else "young village")
                 ok = True if self.dry_run else self.client.send_resources(slot, r["x"], r["y"], ship)
                 if not ok:
                     log.info("[%s] the game refused the shipment to %s", d["name"], r["name"])
@@ -377,7 +406,7 @@ class Bot:
             write_json(path, {k: ts for k, ts in sent.items() if now - ts < 24 * 3600})
         return actions
 
-    def champion_tick(self, villages, plan):
+    def champion_tick(self, villages, plan, roles=None, quiet=None, attacked=False):
         """Every plan["champion"]["every_minutes"]: the champion's rules (travbot/champion.py), run from
         the first village with a Champion's Hall."""
         cfg = plan["champion"]
@@ -391,7 +420,7 @@ class Bot:
             if v["id"] is not None:
                 self.client.select_village(v["id"])
             self.vname = v["name"]
-            acts = self.champion.step(slot, cfg)
+            acts = self.champion.step(slot, cfg, roles, quiet, attacked)
             now = int(time.time())
             return [{**a, "village": v["name"], "time": now} for a in acts]
         return []
@@ -514,6 +543,9 @@ class Bot:
         """Place orders for one village. Returns (state, actions, waits, reserved, note)."""
         actions, waits, note = [], [], None
         label = "[dry-run] " if self.dry_run else ""
+        base_plan = plan
+        role = self.role_of.get(vid, "feeder")
+        plan = overlay(plan, role, self.phase, guardian=(vid is not None and vid == self.roles.data.get("guardian")))
 
         if state["incoming"]["attacks"]:
             log.warning("[%s] %d attack(s) incoming, first in %ss", self.vname,
@@ -570,6 +602,12 @@ class Bot:
                 self._train_raiders(vid, state, plan, reserved, actions)
             except (requests.RequestException, GameError, ValueError, KeyError) as e:
                 log.warning("[%s] raider training failed: %s", self.vname, e)
+            try:
+                self.army.village_step(vid, state, role, base_plan, self.phase, reserved, actions, village_count,
+                                       max(1, sum(1 for r in self.role_of.values() if r == "army")),
+                                       self.champ_extra if role == "army" else None)
+            except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+                log.warning("[%s] army work failed: %s", self.vname, e)
         return state, actions, waits, reserved, note
 
     def _train_page_for(self, state, unit):
@@ -642,6 +680,26 @@ class Bot:
                 pass
             self.archers_checked = time.time()
         plan = {**plan, "archers": self.archers}
+        self.last_plan = plan
+        self.day = self.world.day(self.client)
+        from .world import phase as _phase
+        self.phase = _phase(self.day)
+        known = self.last_seen
+        if not known:   # first round: last run's village states from status.json, else just the village list
+            try:
+                prev = {v["id"]: v for v in json.loads((self.state_dir / "status.json").read_text(encoding="utf-8"))["villages"]}
+            except (OSError, ValueError, KeyError, TypeError):
+                prev = {}
+            known = [{"id": v["id"], "state": {"resources": (prev.get(v["id"]) or {}).get("resources")
+                                                or {k: {"prod": 0} for k in ("wood", "clay", "iron", "crop")}}}
+                     for v in villages]
+        self.role_of = self.roles.assign(known, self.capital)
+        if plan["champion"]["enabled"] and plan["champion"]["strategy"]:
+            best_hall = max((rules.building_level(v["state"], "Hero's Mansion") for v in self.last_seen), default=0)
+            self.champ_extra = self.champions.wanted_units(best_hall, self.phase)
+        log.info("world day %s, phase %s; roles: %s", self.day or "?", self.phase,
+                 ", ".join(f"{v['name']} {self.role_of.get(v['id'])}" for v in villages
+                           if self.role_of.get(v["id"]) != "feeder") or "all feeders")
         try:
             self.allies = ally_status(self.state_dir)
         except OSError as e:
@@ -670,7 +728,7 @@ class Bot:
             if state["incoming"]["attacks"]:
                 soon.append(ATTACK_SLEEP)
             out.append({
-                "id": v["id"], "name": v["name"], "coords": self.coords.get(v["id"]),
+                "id": v["id"], "name": v["name"], "coords": self.coords.get(v["id"]), "role": self.role_of.get(v["id"]),
                 "resources": state["resources"], "queue": state["queue"], "fields": state["fields"],
                 "buildings": {str(k): b for k, b in sorted(state["buildings"].items()) if b},
                 "troops": {units.name(u): n for u, n in sorted(state["troops"].items())},
@@ -684,11 +742,18 @@ class Bot:
             all_actions += self.share(seen, plan)
         except (requests.RequestException, GameError, ValueError, KeyError) as e:
             log.warning("resource sharing failed: %s", e)
+        self.last_seen = seen
         try:  # the alliance's human members: read once per round for gifts and reinforcement targets
             if self.humans.refresh(self.client):
+                for who, victim in self.hostiles.observe(self.humans.ally):
+                    log.info("hostile: %s attacks %s", who, victim)
                 all_actions += self.humans.gifts(self.client, seen, plan, self.client.user, self.coords, self.dry_run)
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
             log.warning("help for human members failed: %s", e)
+        try:  # reports: what attackers sent, what our scouts saw
+            self.army.learn([v["name"] for v in seen])
+        except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+            log.warning("reading reports failed: %s", e)
         try:
             all_actions += self.reinforce(seen, plan)
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
@@ -698,9 +763,45 @@ class Bot:
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
             log.warning("raiding failed: %s", e)
         try:
-            all_actions += self.champion_tick(seen, plan)
+            all_actions += self.champion_tick(seen, plan, self.champions.roles(), self.champions.quiet_jobs(),
+                                              bool((self.humans.ally or {}).get("incoming")))
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
             log.warning("champion failed: %s", e)
+        try:  # timed sends from members' letters, then the counter-strike, then the Wonder / relic support
+            all_actions += self.army.run_schedule()
+            members = {m["name"] for m in (self.humans.ally or {}).get("members", []) if not m.get("bot")}
+            map_pop = {int(k): v.get("pop") for k, v in self.raid.data.get("villages", {}).items()}
+            all_actions += self.army.strikes(seen, self.role_of, self.coords, plan, self.client.user, members, map_pop,
+                                             war_champ=self.champions.war_champion)
+        except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+            log.warning("army failed: %s", e)
+        try:
+            natars = bool(self.day and self.day >= NATAR_ATTACK_DAY)
+            all_actions += self.support.step(seen, self.coords, plan, self.humans.ally, natars)
+        except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+            log.warning("Wonder/relic support failed: %s", e)
+        if plan["champion"]["enabled"] and plan["champion"]["strategy"]:
+            try:   # three champions with jobs: train, move home, clear oases (travbot/champions.py)
+                self.champions.note_attacks(self.humans.ally, {v["id"] for v in seen})
+                guardian = self.champions.guardian_village(seen, self.role_of, self.coords,
+                                                           wonder_villages(self.humans.ally))
+                if not self.dry_run:
+                    self.roles.set_guardian(guardian)
+                all_actions += self.champions.step(seen, self.role_of, self.coords, self.phase, self.capital, guardian)
+                for v in seen:
+                    if self.role_of.get(v["id"]) != "army":
+                        continue
+                    from . import combat as _combat
+                    offence = {u: v["state"]["troops"].get(u, 0) for u in _combat.offence_units(self.tribe)}
+                    all_actions += self.champions.clear_oasis(v, self.coords, {u: n for u, n in offence.items() if n},
+                                                              self.raid, plan,
+                                                              rules.building_level(v["state"], "Hero's Mansion"))
+            except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
+                log.warning("champions failed: %s", e)
+        self.army.save()
+        nxt = self.army.next_departure()
+        if nxt is not None:
+            soon.append(max(15, nxt - time.time() - 30))
         if self.diplomacy:
             try:
                 msg = self.diplomacy.step(self.client, seen, self.dry_run)
@@ -711,8 +812,18 @@ class Bot:
             except (requests.RequestException, GameError, ValueError, KeyError) as e:
                 log.warning("diplomacy failed: %s", e)
         sleep = min(soon) if soon else IDLE_SLEEP
-        sleep = max(MIN_SLEEP, min(MAX_SLEEP, sleep)) + random.uniform(0, 20)
+        floor = 15 if nxt is not None and nxt - time.time() < MIN_SLEEP else MIN_SLEEP   # a timed send is near
+        sleep = max(floor, min(MAX_SLEEP, sleep)) + random.uniform(0, 20 if floor == MIN_SLEEP else 2)
         return out, all_actions, sleep
+
+
+def _alliance_summary(feed):
+    if not feed or not feed.get("alliance"):
+        return None
+    members = feed.get("members", [])
+    return {"name": feed["alliance"].get("name"), "members": len(members),
+            "humans": sum(1 for m in members if not m.get("bot")),
+            "wonders": len(wonder_villages(feed)), "relics": len(relic_villages(feed))}
 
 
 def run_bot(state_dir, args, ready):
@@ -759,6 +870,7 @@ def run_bot(state_dir, args, ready):
         mail_models = os.environ.get("TRAVBOT_MAIL_MODELS") or os.environ.get("TRAVBOT_ADVISOR_MODELS", "gemma4:26b,ornith:9b")
         mailer = Mailer(client, account["user"], tribe, state_dir, ollama_url,
                         [m.strip() for m in mail_models.split(",") if m.strip()], all_bots)
+        mailer.requests = Requests(bot, ollama_url, [m.strip() for m in mail_models.split(",") if m.strip()])
     ready.set()
 
     force_advice = args.advise_now
@@ -772,6 +884,12 @@ def run_bot(state_dir, args, ready):
             status = {"updated": int(time.time()), "account": account["user"], "plan_source": source,
                       "tribe": bot.tribe, "villages": villages, "expansion": bot.expansion.summary(),
                       "raid": bot.raid.summary(),
+                      "world": {"day": bot.day, "phase": bot.phase, "relics_day": bot.world.info()["relics_day"],
+                                "wonder_day": bot.world.info()["wonder_day"]},
+                      "hostiles": bot.hostiles.summary(plan["counter"]["hostile_days"]),
+                      "army": bot.army.summary(),
+                      "champions": bot.champions.summary(),
+                      "alliance": _alliance_summary(bot.humans.ally),
                       "diplomacy": bot.diplomacy.summary() if bot.diplomacy else None,
                       "recent_actions": history, "next_tick_in": int(sleep)}
             if not args.dry_run:

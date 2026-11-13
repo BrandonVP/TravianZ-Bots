@@ -65,9 +65,11 @@ class ChampionKeeper:
         return not item.get("family") or item["family"] == family
 
     # ------------------------------------------------------------------ one round
-    def step(self, slot, cfg):
+    def step(self, slot, cfg, roles=None, quiet=None, alliance_attacked=False):
         """Run every champion rule once from the Champion's Hall in `slot` of the selected village,
-        for each living champion of the account (the game lists them; ?champ=<heroid> picks one)."""
+        for each living champion of the account (the game lists them; ?champ=<heroid> picks one).
+        roles: heroid -> stat role (travbot/champions.py jobs); quiet: heroid -> job of champions that stay near
+        home (short quests only; the guardian none while the alliance is attacked)."""
         first = page_data(self.client.get(f"build.php?id={slot}&t4tab=items"), "tz-champ")
         if not first or not first.get("hero"):
             return []   # no champion (training one is left to the player)
@@ -75,7 +77,12 @@ class ChampionKeeper:
         actions = []
         for i, ch in enumerate(champs):
             base = f"build.php?id={slot}" + (f"&champ={ch['heroid']}" if ch else "")
-            actions += self._step_one(base, cfg, auction=(i == 0))   # one Auction House round per tick
+            hid = ch["heroid"] if ch else None
+            role = (roles or {}).get(hid, cfg["role"])
+            job = (quiet or {}).get(hid)
+            quests = cfg["quests"] and not (job == "guardian" and alliance_attacked)
+            actions += self._step_one(base, {**cfg, "role": role, "quests": quests, "max_tier": 1 if job else 9},
+                                      auction=(i == 0))   # one Auction House round per tick
         return actions
 
     def _step_one(self, base, cfg, auction):
@@ -217,7 +224,7 @@ class ChampionKeeper:
             return None
         health = q["health"]
         safe = [o for o in q["offers"]
-                if o["hp"][1] <= health - cfg["quest_health_margin"]
+                if o["hp"][1] <= health - cfg["quest_health_margin"] and o["tier"] <= cfg.get("max_tier", 9)
                 and (o["tier"] < 3 or health >= cfg["expedition_min_health"])]
         if not safe:
             return None

@@ -248,3 +248,77 @@ class GameClient:
             after = parse.parse_troops(parse._soup(self.get("dorf1.php"))).get(settler, 0)
             return after < before
         return True
+
+    # --- army, intel and requests (plan 2026-11-13-smarter-bots) ------------------------------
+
+    def send_army(self, x, y, c, slots, champion=False, ctar1=None, spy=None, probe=False, champ_id=None):
+        """Rally Point order from the current village: c=2 reinforce, 3 attack, 4 raid (scouts only + c=3 = scouting,
+        spy 1 resources / 2 defences). `slots` maps form slot (1-10) -> count. champion=True takes the champion
+        along when one is at home. ctar1 = catapult target building type (attack only).
+        probe=True stops at the confirmation page and only reads the travel time.
+        Returns {"ok": bool, "travel": seconds or None, "error": text or None}."""
+        data = {"b": 1, "c": c, "x": x, "y": y, "dname": "", "s1": "ok"}
+        for slot, n in slots.items():
+            if n:
+                data[f"t{slot}"] = int(n)
+        if champ_id is not None:          # one particular champion (several champions: ?champ=<heroid>)
+            data["champ"] = str(champ_id)
+        elif champion:
+            champ = parse.parse_champion_option(self.get("a2b.php"))
+            if champ:
+                data["champ"] = champ
+        page = self.post("a2b.php", data)
+        confirm = parse.parse_a2b_confirm(page)
+        travel = parse.parse_travel_time(page)
+        if confirm is None or "beginners protection" in page.lower():
+            err = parse.parse_form_error(page) or ("beginners protection" if "beginners protection" in page.lower()
+                                                   else "refused")
+            return {"ok": False, "travel": travel, "error": err}
+        if probe:
+            return {"ok": True, "travel": travel, "error": None}
+        if spy in (1, 2):
+            confirm["spy"] = spy
+        if ctar1 is not None:
+            confirm["ctar1"] = ctar1
+        after = self.post("a2b.php", confirm)
+        # success redirects to the Rally Point; a refusal back to the send form (name="snd") with p.error
+        err = (parse.parse_form_error(after) or "refused") if 'name="snd"' in after else None
+        if "already processed" in after.lower():
+            err = "already processed"
+        return {"ok": err is None, "travel": travel, "error": err}
+
+    def feed(self, action):
+        """The game's bot feed (ajax.php?f=tzbot&a=ally|inbox|recruits) as a dict, or None."""
+        import json
+        try:
+            return json.loads(self.get(f"ajax.php?f=tzbot&a={action}"))
+        except ValueError:
+            return None
+
+    def mark_read(self, ids):
+        """Mark inbox messages read (the feed's a=read)."""
+        if not ids:
+            return
+        self._pace()
+        self.session.post(urljoin(self.base, "ajax.php?f=tzbot&a=read"), timeout=self.timeout,
+                          data={"ids": ",".join(str(int(i)) for i in ids)}, headers={"X-TZ-Bot": "1"})
+
+    def celebration_running(self, townhall_slot):
+        return parse.parse_celebration_running(self.get(f"build.php?id={townhall_slot}"))
+
+    def celebrate(self, townhall_slot, kind=1):
+        """Start a celebration in the Town Hall (1 small, 2 great). The game checks costs and levels."""
+        self.get(f"celebration.php?type={int(kind)}&id={int(townhall_slot)}")
+        return self.celebration_running(townhall_slot)
+
+    def upgrades(self, slot):
+        """Blacksmith/Armoury page as parse.parse_upgrades()."""
+        return parse.parse_upgrades(self.get(f"build.php?id={slot}"))
+
+    def report_detail(self, rid):
+        return parse.parse_report_detail(self.get(f"berichte.php?id={int(rid)}"))
+
+    def oasis_troops(self, x, y):
+        """Animals in the unoccupied oasis at (x|y) by unit id ({} = empty), or None if it isn't one."""
+        wref = tile_id(x, y)
+        return parse.parse_oasis_troops(self.get(f"karte.php?d={wref}&c={map_check(wref)}"))

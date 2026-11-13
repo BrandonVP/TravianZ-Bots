@@ -15,12 +15,13 @@ from .names import display, display_text
 
 log = logging.getLogger(__name__)
 
-# Buildings the advisor may target. Only buildings the bot can make use of: economy, storage,
-# defence (Barracks for the basic defender, Palisade) and expansion (Residence).
+# Buildings the advisor may target: economy, storage, defence, expansion, and (2026-11-13) the army,
+# culture and support buildings the bot now uses. Village roles (travbot/roles.py) add their own on top.
 BUILDING_NAMES = [
     "Main Building", "Warehouse", "Granary", "Cranny", "Rally Point", "Marketplace",
     "Embassy", "Grain Mill", "Bakery", "Sawmill", "Brickyard", "Iron Foundry",
-    "Residence", "Palisade", "Barracks",
+    "Residence", "Palisade", "Barracks", "Academy", "Blacksmith", "Armoury", "Stable", "Workshop",
+    "Town Hall", "Hero's Mansion", "Trade Office", "Great Warehouse", "Great Granary", "Treasury",
 ]
 
 PLAN_SCHEMA = {
@@ -69,6 +70,22 @@ PLAN_SCHEMA = {
             "required": ["finish_now", "max_finish_price", "min_minutes_per_gold", "reserve", "capital_reserve",
                          "max_per_tick"],
         },
+        "army": {
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}, "unit_target": {"type": "integer"},
+                           "budget_share": {"type": "number"}, "cavalry_share": {"type": "number"}},
+            "required": ["enabled", "unit_target", "budget_share", "cavalry_share"],
+        },
+        "culture": {
+            "type": "object",
+            "properties": {"celebrations": {"type": "boolean"}, "keep_share": {"type": "number"}},
+            "required": ["celebrations", "keep_share"],
+        },
+        "wonder": {
+            "type": "object",
+            "properties": {"keep_share": {"type": "number"}, "troop_share": {"type": "number"}},
+            "required": ["keep_share", "troop_share"],
+        },
         "share": {
             "type": "object",
             "properties": {"enabled": {"type": "boolean"}, "young_ratio": {"type": "number"},
@@ -79,14 +96,35 @@ PLAN_SCHEMA = {
         },
     },
     "required": ["notes", "resource_weights", "field_max_level", "min_net_crop", "storage_buffer_hours",
-                 "save_up_hours", "building_targets", "defense", "expansion", "gold", "share"],
+                 "save_up_hours", "building_targets", "defense", "expansion", "gold", "share", "army", "culture",
+                 "wonder"],
 }
 
 SYSTEM_PROMPT = """You are the strategy advisor for a bot playing Empires of Rome (a Roman-era browser strategy game), tribe Gauls.
-The bot upgrades resource fields, constructs/upgrades buildings, trains the basic defensive unit (Phalanx) in
-the Barracks, founds new villages with settlers, spends village gold on "Finish now" and ships surplus resources
-from rich villages to young ones through the Marketplace. It does not attack or research. The same plan is
-applied to every village the bot owns.
+The bot is an AI ally in an alliance with human players. Its job is to help its alliance win and to be a
+strong, credible player that is not worth farming - never a bully: it never raids active players.
+
+How this world is won (the playbook): the alliance that finishes a Wonder of the Ancients at level 100 wins. The
+HUMAN members build the Wonder; the bot's part is a strong economy, many villages, an army that has the
+alliance's back, and sending resources and troops to the alliance's Wonder and relic villages.
+Phases by world day: opening (1-4: balanced fields to ~5, Main Building, Cranny, Embassy), second village (5-9:
+Residence 10, settlers, culture points), growth (10-29: settle whenever culture points allow, capital becomes a
+cropper, an army village with Barracks/Stable/Academy/Blacksmith/Workshop, Town Hall celebrations), relics
+(30-49: relics appear in Etruscan villages; bigger army with catapults, defend relic holders), wonder (50+:
+Wonder villages appear; feed the alliance's Wonder, stack defence in it; the Etruscans attack Wonders from day 60).
+
+What the bot does on its own (you don't control these directly):
+- village roles: the capital (crop, Town Hall, Armoury), one army village (two from 8 villages) that trains the
+  attack army and upgrades it in the Blacksmith, and feeder villages; each role gets the buildings it needs for
+  the phase in front of your building_targets;
+- it researches its attack units, rams and catapults, upgrades attack (Blacksmith) and defence (Armoury);
+- it keeps a hostile list of players who attacked it or an alliance member, scouts them and strikes back in
+  proportion (never small or protected players, never catapults or conquest against humans);
+- it answers members' letters, sending resources, defenders, scouts or an attack they ask for, within limits;
+- it makes up to three champions (1 with a Champion's Hall, 2 at Hall 10, 3 at Hall 20): a war champion that
+  marches with counter-strikes and clears oases, a steward in the capital (resources and gold) and a guardian
+  in the most-attacked village (defence). The roles build the Halls.
+Your plan applies to every village; the roles add on top.
 
 You do not act directly. You write a plan that a rules engine follows until your next review (about an hour):
 - resource_weights (0-10 each): higher = the bot upgrades that resource's fields sooner. The bot picks the
@@ -138,10 +176,20 @@ Guidance: balanced fields early; keep net crop comfortably positive because buil
 upkeep; Main Building levels speed up all construction; a Cranny hides resources from raids; keep a modest
 defence early and raise it if attacks were seen; expansion is a long-term goal once the economy is solid
 and is limited by culture points (every building level adds some).
+A Treasury (Main Building 10) hides village gold from raiders: the roles give the capital Treasury 10 and the
+other villages Treasury 5 later; raise it only where a lot of gold sits. Bots never use it for relics.
 Gold: only Gold Mines produce gold (resource fields 45/46 in some villages; the bot levels them with the
 fields). Main Building and Marketplace levels do not add gold. Raids can steal gold that
 is not protected by a Treasury (needs Main Building 10; it holds 1/10 of a Warehouse of the same level). The bot
 spends gold on Finish now (see "gold"); a village's gold stops growing at its cap (8,000 without a Treasury).
+- army: enabled; unit_target (0-3000): attack units in the growth phase (x2 in relics, x3 in wonder), split over
+  the army villages; the bot never keeps more than 250 per village it owns, so aim for about 100-150 per village
+  - the economy comes first, troops cost upkeep; budget_share (0-0.9) of resources per round for them; cavalry_share (0-1) of the army that is
+  cavalry (faster, better raiders; infantry is cheaper). Raise it when the alliance is attacked a lot.
+- culture: celebrations (true/false) in Town Halls for culture points (more villages); keep_share (0-0.9) of
+  storage a village keeps when it starts one.
+- wonder: keep_share (0.1-0.9) of storage each village keeps when shipping to the alliance's Wonder;
+  troop_share (0-0.8) of spare defenders sent to stack in it (only matters once a member holds a Wonder).
 Put a short explanation (max 3 sentences) in "notes"."""
 
 
@@ -165,16 +213,29 @@ def _village_summary(v):
         "  Saving for: " + (f"{v['saving_for']['name']} (~{v['saving_for']['eta_min']} min)" if v.get("saving_for") else "nothing"),
         "  Gold: " + (f"{v['gold']['amount']}/{v['gold']['cap']} (+{v['gold']['prod']}/h)" if v.get("gold") else "unknown")
         + (" - this is the capital" if v.get("capital") else ""),
+        f"  Role: {v.get('role', 'feeder')}",
     ])
 
 
 def _summary(status, current_plan):
-    lines = [f"The bot owns {len(status['villages'])} village(s)."]
+    w = status.get("world") or {}
+    lines = [f"World day {w.get('day') or 'unknown'}, phase: {w.get('phase', 'growth')} (relics day "
+             f"{w.get('relics_day')}, Wonder villages day {w.get('wonder_day')}).",
+             f"The bot owns {len(status['villages'])} village(s)."]
     lines += [_village_summary(v) for v in status["villages"]]
     lines.append("Expansion progress: " + (json.dumps(status.get("expansion")) if status.get("expansion") else "not started"))
     lines.append("Recent bot actions: " + (", ".join(
         f"{a['action']} {a['name']}" for a in status["recent_actions"][-12:]) or "none"))
-    lines.append("Current plan: " + json.dumps(current_plan))
+    hostile = status.get("hostiles") or []
+    lines.append("Players who attacked the alliance recently: " + ("; ".join(hostile) if hostile else "none"))
+    ally = status.get("alliance") or {}
+    if ally:
+        lines.append(f"Alliance: {ally.get('members', 0)} members ({ally.get('humans', 0)} human); "
+                     f"Wonder villages: {ally.get('wonders', 0)}; relic villages: {ally.get('relics', 0)}.")
+    army = status.get("army") or {}
+    if army.get("log"):
+        lines.append("Recent army events: " + "; ".join(e["text"] for e in army["log"][-5:]))
+    lines.append("Current plan: " + json.dumps({k: v for k, v in current_plan.items() if k not in ("counter",)}))
     return "\n".join(lines)
 
 

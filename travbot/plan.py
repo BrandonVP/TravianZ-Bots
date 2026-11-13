@@ -67,7 +67,7 @@ DEFAULT_PLAN = {
     },
     "expansion": {
         "enabled": True,
-        "max_villages": 3,
+        "max_villages": 8,
         # how far (tiles) to look for a free valley around the settling village
         "search_radius": 8,
         # prefer valleys with at least this many croplands (6 = normal 4-4-4-6)
@@ -125,6 +125,9 @@ DEFAULT_PLAN = {
         "gold_per_point": 30,         # most gold a weighted stat point is worth (merchant Rare ~150-300)
         "max_capital_share": 0.25,    # a bid never above this share of the capital's gold
         "max_open_bids": 2,
+        # three champions with jobs (travbot/champions.py): war / steward / guardian
+        "strategy": True,
+        "oasis_radius": 6,            # the war champion clears oases with animals this close to the army village
     },
     "share": {
         # rich villages ship surplus resources to young ones through the Marketplace
@@ -147,6 +150,55 @@ DEFAULT_PLAN = {
         # for shipments to allies the donor keeps at least this share of its storage
         "ally_keep_share": 0.3,
     },
+    # --- plan 2026-11-13-smarter-bots ---------------------------------------------------------------
+    "army": {
+        # the attack army in the army village (travbot/army.py); size grows with the world's phase
+        # (growth x1, relics x2, wonder x3); rams for walls, catapults from the relics phase (Etruscans only)
+        "enabled": True,
+        "unit_target": 150,
+        "budget_share": 0.3,
+        "cavalry_share": 0.4,
+        "ram_share": 0.06,
+        "catapult_share": 0.08,
+        "scouts": 10,
+    },
+    "culture": {
+        # Town Hall celebrations for culture points (more villages); the village keeps keep_share of storage
+        "celebrations": True,
+        "keep_share": 0.3,
+    },
+    "counter": {
+        # the hostile list and the counter-strike (fair play: see travbot/army.py). The advisor cannot change these.
+        "enabled": True,
+        "hostile_days": 3,
+        "radius": 25,
+        "margin": 1.5,
+        "size_factor": 1.5,
+        "per_target_per_day": 1,
+        "per_bot_per_day": 3,
+        "min_target_pop": 100,
+        "scout_max_age_h": 6,
+        "scouts_per_run": 3,
+    },
+    "requests": {
+        # members' letters become actions (travbot/letters.py)
+        "enabled": True,
+        "per_member_per_day": 3,
+        "gift_hours": 1.5,
+        "troop_share": 0.4,
+        "attack_share": 0.5,
+    },
+    "wonder": {
+        # resources and troops for members' Wonder and relic villages (travbot/wonder.py)
+        "enabled": True,
+        "keep_share": 0.35,
+        "min_shipment": 2000,
+        "radius": 40,
+        "troop_share": 0.25,
+        "relic_share": 0.15,
+        "troop_every_hours": 12,
+    },
+    "roles": {"enabled": True},
 }
 
 RESOURCES = ("wood", "clay", "iron", "crop")
@@ -242,7 +294,7 @@ def validate(raw):
 
     champ = raw.get("champion")
     if isinstance(champ, dict):
-        for key in ("enabled", "quests", "shop", "sell_spare", "auction"):
+        for key in ("enabled", "quests", "shop", "sell_spare", "auction", "strategy"):
             if isinstance(champ.get(key), bool):
                 plan["champion"][key] = champ[key]
         if champ.get("role") in ("attack", "defence", "economy"):
@@ -251,7 +303,8 @@ def validate(raw):
                                   ("quest_health_margin", 0, 100, float), ("expedition_min_health", 0, 100, float),
                                   ("shop_min_gold", 0, 100000, int), ("sell_max_rarity", 0, 5, int),
                                   ("min_gain", 0, 100, float), ("gold_per_point", 0, 1000, float),
-                                  ("max_capital_share", 0, 1, float), ("max_open_bids", 0, 10, int)):
+                                  ("max_capital_share", 0, 1, float), ("max_open_bids", 0, 10, int),
+                                  ("oasis_radius", 0, 15, int)):
             v = _num(champ, key, lo, hi, cast)
             if v is not None:
                 plan["champion"][key] = v
@@ -268,7 +321,31 @@ def validate(raw):
             v = _num(share, key, lo, hi, cast)
             if v is not None:
                 plan["share"][key] = v
+    _section(raw, plan, "army", ("enabled",), (("unit_target", 0, 3000, int), ("budget_share", 0, 0.9, float),
+                                                ("cavalry_share", 0, 1, float), ("ram_share", 0, 0.3, float),
+                                                ("catapult_share", 0, 0.3, float), ("scouts", 0, 100, int)))
+    _section(raw, plan, "culture", ("celebrations",), (("keep_share", 0, 0.9, float),))
+    _section(raw, plan, "requests", ("enabled",), (("per_member_per_day", 0, 10, int), ("gift_hours", 0, 4, float),
+                                                   ("troop_share", 0, 0.8, float), ("attack_share", 0, 0.8, float)))
+    _section(raw, plan, "wonder", ("enabled",), (("keep_share", 0.1, 0.9, float), ("min_shipment", 0, 100000, int),
+                                                 ("radius", 5, 80, int), ("troop_share", 0, 0.8, float),
+                                                 ("relic_share", 0, 0.5, float), ("troop_every_hours", 1, 72, float)))
+    _section(raw, plan, "roles", ("enabled",), ())
+    # "counter" (the fair-play limits of the counter-strike) is not taken from plan files: only the code sets it
     return plan
+
+
+def _section(raw, plan, name, bools, nums):
+    sec = raw.get(name) if isinstance(raw, dict) else None
+    if not isinstance(sec, dict):
+        return
+    for key in bools:
+        if isinstance(sec.get(key), bool):
+            plan[name][key] = sec[key]
+    for key, lo, hi, cast in nums:
+        v = _num(sec, key, lo, hi, cast)
+        if v is not None:
+            plan[name][key] = v
 
 
 def load(path, max_age_hours):
