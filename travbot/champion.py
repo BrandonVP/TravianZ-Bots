@@ -31,9 +31,13 @@ def page_data(html, block):
     if not m:
         return None
     try:
-        return json.loads(m.group(1))
+        data = json.loads(m.group(1))
     except ValueError:
         return None
+    # PHP prints an empty array as [] and not {}: a champion with nothing equipped has "equipped": []
+    if isinstance(data, dict) and isinstance(data.get("equipped"), list):
+        data["equipped"] = {str(i): v for i, v in enumerate(data["equipped"]) if v}
+    return data
 
 
 def _checker(html):
