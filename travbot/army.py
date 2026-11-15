@@ -326,7 +326,7 @@ class Army:
                     for u, n in force.items():
                         offence[u] -= n
                     offence = {u: n for u, n in offence.items() if n > 0}
-                    self._tell_victims(p, me, member_names)
+                    self._tell_victims(uid, p, me, member_names)
                 else:
                     self.data["skip"][key] = now + 86400
                 if len(self.hostiles.strikes_since(now - 86400, bot=me)) >= cfg["per_bot_per_day"]:
@@ -349,10 +349,13 @@ class Army:
         return [{"action": "attack" if c == 3 else "send", "name": what, "slot": 39, "village": v["name"],
                  "reason": "army", "time": int(time.time())}]
 
-    def _tell_victims(self, p, me, member_names):
-        """A short note to the human members this player attacked: the alliance answered."""
+    def _tell_victims(self, uid, p, me, member_names):
+        """A short note to the human members this player attacked: the alliance answered. Once per victim until
+        the player attacks again, however many strikes follow."""
         for victim in p.get("victims", {}):
             if victim in member_names and victim != me and not self.dry_run:
+                if not self.hostiles.tell_once(uid, victim):
+                    continue
                 try:
                     self.c.send_message(victim, f"We answered {p['name']}"[:35],
                                         f"{p['name']} attacked you. My army is on its way to them now - "

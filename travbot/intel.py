@@ -101,6 +101,21 @@ class Hostiles:
             data["strikes"] = [s for s in data["strikes"] if now - s["time"] < 14 * 86400]
             _save(self.path, data)
 
+    def tell_once(self, uid, victim, now=None):
+        """True the first time a victim is to be told that this player was answered; True again only after the
+        player has attacked once more. The strikes go on for `hostile_days`, one letter per strike was too many."""
+        with _LOCK:
+            data = _load(self.path)
+            p = data["players"].get(str(uid))
+            if p is None:
+                return False
+            told = p.setdefault("told", {})
+            if told.get(victim, 0) >= p.get("last", 0):
+                return False
+            told[victim] = now or time.time()
+            _save(self.path, data)
+            return True
+
     def summary(self, days, now=None):
         """Short lines for the advisor and the letters: who attacked whom recently."""
         out = []
