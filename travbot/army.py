@@ -7,7 +7,9 @@ Fair play (Brandon 2026-11-13: no heavy raiding of active players; "you want an 
   `per_bot_per_day` per bot;
 - never a village below `min_target_pop`, never a player under beginners protection (the game refuses anyway);
 - normal attacks with infantry/cavalry and rams only: no catapults and no chiefs against humans;
-- the force is sized to win with a margin and to roughly what the attacker sent (`size_factor`), not more;
+- the force is sized to win with a margin and to roughly what the attacker sent (`size_factor`), not more, but
+  never less than `min_share` of the army at home: an empty village and an unknown attacker used to mean a
+  "strike" of one soldier of each kind;
 - a scouting run comes first, so the bots don't throw troops at an army they can't beat.
 Catapults are trained from the relics phase for Etruscan (Natar) targets only (relics, Wonder support).
 
@@ -307,7 +309,8 @@ class Army:
                 theirs = 0
                 if p.get("force"):
                     theirs = sum(combat.attack_power({int(u): n for u, n in p["force"].items()}))
-                force = combat.size_force(offence, max(need, min(cfg["size_factor"] * theirs, inf + cav)))
+                floor = cfg["min_share"] * (inf + cav)   # a strike is a real part of the army, whatever the defence
+                force = combat.size_force(offence, max(need, floor, min(cfg["size_factor"] * theirs, inf + cav)))
                 if force is None:
                     self._note(f"{p['name']}'s village ({x}|{y}) is too strong to strike now "
                                f"(defence ~{int(need / cfg['margin'])}, our attack {inf + cav})")

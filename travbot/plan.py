@@ -174,6 +174,7 @@ DEFAULT_PLAN = {
         "radius": 25,
         "margin": 1.5,
         "size_factor": 1.5,
+        "min_share": 0.5,
         "per_target_per_day": 1,
         "per_bot_per_day": 3,
         "min_target_pop": 100,
