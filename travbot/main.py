@@ -788,6 +788,9 @@ class Bot:
         try:
             natars = bool(self.day and self.day >= NATAR_ATTACK_DAY)
             all_actions += self.support.step(seen, self.coords, plan, self.humans.ally, natars)
+            # a member started a Wonder: a letter of congratulations and support (once per bot and Wonder)
+            writer = self.diplomacy.writer if self.diplomacy else template_letter
+            all_actions += self.support.letters(seen, self.coords, plan, self.humans.ally, writer, self.client.user)
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
             log.warning("Wonder/relic support failed: %s", e)
         if plan["champion"]["enabled"] and plan["champion"]["strategy"]:

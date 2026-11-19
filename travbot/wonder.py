@@ -10,11 +10,15 @@ troops     bot villages within `wonder.radius` move `wonder.troop_share` of thei
            `defense.reinforce_keep` into the Wonder village, at most once per `wonder.troop_every_hours` per
            village; from the day the Etruscans attack Wonders the share doubles;
 relics     a member's village holding a relic gets a garrison the same way (`wonder.relic_share`).
+letter     when a human member starts building a Wonder (level 1 or more), each bot writes them once: congratulations,
+           and exactly the help that bot gives - shipments, defenders, more of them when the Etruscans march
+           (Brandon 2026-11-19). Some minutes after the bot first sees it, and only while the bots are "awake".
 Attacks on these villages are also answered by the normal reinforcement (Bot.reinforce).
 """
 import json
 import logging
 import math
+import random
 import threading
 import time
 
@@ -81,6 +85,68 @@ class Support:
             actions += self._troops(villages, coords, plan, t, cfg["relic_share"], "relic")
         self._save()
         return actions
+
+    def letters(self, villages, coords, plan, feed, writer, me):
+        """Congratulate a human member who has started a Wonder, once per bot and Wonder, with the help this bot
+        really gives. writer(kind, ctx) -> (subject, text). Returns actions."""
+        from .mailer import AWAKE_FROM, AWAKE_TO, REPLY_MIN_S, REPLY_MAX_S
+        cfg = plan["wonder"]
+        if not cfg["enabled"] or not feed:
+            return []
+        humans = {m["name"] for m in feed.get("members", []) if not m.get("bot") and m["name"] != me}
+        alliance = (feed.get("alliance") or {}).get("name") or ""
+        now, actions = time.time(), []
+        for w in wonder_villages(feed):
+            if w["owner"] not in humans or int(w.get("level") or 0) < 1:
+                continue
+            key = f"letter:{w['owner']}:{w['wref']}"
+            if key in self.sent:
+                continue
+            due = self.sent.get("due:" + key)
+            if due is None:   # first sighting: write some minutes later, like a person would
+                self.sent["due:" + key] = now + random.randint(REPLY_MIN_S, REPLY_MAX_S)
+                self._save()
+                continue
+            if now < due or not AWAKE_FROM <= time.localtime(now).tm_hour < AWAKE_TO:
+                continue
+            ctx = self._letter_facts(villages, coords, cfg, w, me, alliance)
+            if self.dry_run:
+                log.info("wonder: [dry-run] would congratulate %s on the Wonder at %s (%s|%s): %s", w["owner"],
+                         w["name"], w["x"], w["y"], ctx)
+                continue
+            subject, text = writer("wonder", ctx)
+            self.c.send_message(w["owner"], subject, text)
+            self.sent[key] = now
+            self.sent.pop("due:" + key, None)
+            self._save()
+            log.info("wonder: congratulated %s on the Wonder at %s (%s|%s)", w["owner"], w["name"], w["x"], w["y"])
+            actions.append({"action": "letter", "name": f"congratulated {w['owner']} on their Wonder", "slot": 0,
+                            "reason": "Wonder", "village": "", "time": int(now)})
+        return actions
+
+    @staticmethod
+    def _letter_facts(villages, coords, cfg, w, me, alliance):
+        """What this bot will do for the Wonder, from its own villages (the same rules as _resources / _troops)."""
+        markets, near, nearest = 0, 0, None
+        for v in villages:
+            c, st = coords.get(v["id"]), v["state"]
+            if not c or tuple(c) == (w["x"], w["y"]):
+                continue
+            d = math.hypot(c[0] - w["x"], c[1] - w["y"])
+            if rules.find_slot(st, "Marketplace") is not None:
+                markets += 1
+            if d <= cfg["radius"] and rules.find_slot(st, "Rally Point") is not None:
+                near += 1
+            if nearest is None or d < nearest[0]:
+                nearest = (d, v["name"], c[0], c[1])
+        place = None
+        if nearest:
+            n = max(1, round(nearest[0]))
+            place = {"village": nearest[1], "x": nearest[2], "y": nearest[3],
+                     "away": "one square" if n == 1 else f"about {n} squares"}
+        return {"me": me, "to": w["owner"], "village": w["name"], "x": w["x"], "y": w["y"], "level": w["level"],
+                "alliance": alliance, "markets": markets, "troop_villages": near, "radius": cfg["radius"],
+                "nearest": place}
 
     def _resources(self, villages, coords, cfg, wonders):
         actions = []

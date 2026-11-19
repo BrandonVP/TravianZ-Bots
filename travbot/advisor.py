@@ -335,6 +335,23 @@ class Advisor:
             task = (f"You are {ctx['me']}, a chieftain of the {who} in Empires of Rome, a Roman-era strategy game. You just accepted "
                     f"{ctx['to']}'s invitation and joined the alliance \"{ctx['alliance']}\". Write {ctx['to']} a short, "
                     f"in-character letter of thanks and loyalty.")
+        elif kind == "wonder":
+            help_facts = []
+            if ctx.get("markets"):
+                help_facts.append("your merchants will carry your villages' spare resources to the Wonder village")
+            if ctx.get("troop_villages"):
+                help_facts.append("your villages near it will send defenders to stay in the Wonder village, and twice "
+                                  "as many once the Etruscans start attacking Wonders")
+            facts = ("What you will do, and nothing more: " + "; ".join(help_facts) + "."
+                     if help_facts else "Your villages are too far away and too young to help much yet; say so kindly "
+                                        "and offer to help if they write to you.")
+            task = (f"You are {ctx['me']}, a chieftain of the {who} in Empires of Rome, a Roman-era strategy game"
+                    + (f", in the alliance \"{ctx['alliance']}\"" if ctx.get("alliance") else "") + ". "
+                    f"Your ally {ctx['to']} has just started building a Wonder of the Ancients in their village "
+                    f"{ctx['village']} ({ctx['x']}|{ctx['y']}); finishing it to level 100 wins the world. Write "
+                    f"{ctx['to']} a short, warm, in-character letter: congratulations, support, and your commitment to "
+                    f"defend the Wonder. {facts} Never promise gold, numbers or anything not listed. Never mention "
+                    f"being a bot, AI or a program.")
         else:
             return None
         task += " Sign with your name. Keep the text under 600 characters and the subject under 50."

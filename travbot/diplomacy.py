@@ -281,6 +281,31 @@ def template_letter(kind, ctx):
                 + ("not many, but you will not face them alone." if ctx.get("small", True)
                    else "hold the walls, you will not face them alone.")
                 + f"\n\n{ctx['me']}")
+    if kind == "wonder":
+        # a member has started a Wonder: congratulations and exactly the help this bot gives (travbot/wonder.py)
+        where = f"{ctx['village']} ({ctx['x']}|{ctx['y']})"
+        help_parts = []
+        if ctx.get("markets"):
+            help_parts.append("my merchants will carry everything my villages can spare to it"
+                              if ctx["markets"] > 1 else "my merchants will carry what my village can spare to it")
+        if ctx.get("troop_villages"):
+            help_parts.append("my defenders will march to its walls and stay there - "
+                              "twice as many once the Etruscans march on the Wonders")
+        if help_parts:
+            help_line = "From today " + join_list(help_parts) + "."
+        else:
+            n = ctx.get("nearest")
+            help_line = ("My villages are still too far away and too young to send much"
+                         + (f" (the nearest is {n['away']} from you)" if n else "")
+                         + ", but write to me if you need something and I will do what I can.")
+        ally = f"All of {ctx['alliance']}" if ctx.get("alliance") else "We"
+        # only a bot whose defenders can reach the Wonder promises to stand in the way
+        stand = ("will stand with you until the last level is laid; whoever comes for it will have to go through us first."
+                 if ctx.get("troop_villages") else "will stand with you until the last level is laid.")
+        return (f"A Wonder at {ctx['village']}"[:50],
+                f"Greetings {ctx['to']},\n\nWord has reached me that the first stones of a Wonder of the Ancients "
+                f"are rising at {where}. Few rulers ever dare it - you have my admiration.\n\n{help_line} "
+                f"{ally} {stand}\n\n{ctx['me']}")
     return ("Greetings", f"Greetings {ctx.get('to', '')},\n\n{ctx['me']}")
 
 
