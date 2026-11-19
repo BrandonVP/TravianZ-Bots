@@ -1,10 +1,11 @@
 """World clock: which day of the world it is and which phase of the playbook that puts the bots in.
 
 The playbook (plan //TRUENAS/Ai/Claude/plans/2026-11-13-smarter-bots.md, section 1):
-  opening (days 1-4) -> second village (5-9) -> growth (10-29) -> relics (30-49) -> wonder (50+)
-Relics appear on day RELICS_DAY, Wonder villages and building plans on WONDER_DAY, and the Etruscans (Natars)
-attack Wonders from NATAR_ATTACK_DAY (world settings 2026-11-09: NATARS_SPAWN_TIME 30, NATARS_WW_SPAWN_TIME 50,
-NATARS_WW_START_DELAY 10). Override with TRAVBOT_RELICS_DAY / TRAVBOT_WONDER_DAY when a world uses other values.
+  opening (days 1-4) -> second village (5-9) -> growth (10-39) -> relics (40-79) -> wonder (80+)
+Relics appear on day RELICS_DAY and Wonder villages and building plans on WONDER_DAY (the game's NATARS_SPAWN_TIME
+and NATARS_WW_SPAWN_TIME / NATARS_WW_BUILDING_PLAN_SPAWN_TIME: 40 and 80 since 2026-11-19, were 30 and 50).
+Override with TRAVBOT_RELICS_DAY / TRAVBOT_WONDER_DAY when a world uses other values. The Etruscans attack a
+Wonder by its level, not by day (travbot/wonder.py).
 
 The day comes from the game ("Days since start" on statistiken.php?id=0, read at most every few hours), or from
 TRAVBOT_WORLD_START (unix time of the world's start) when set.
@@ -15,9 +16,8 @@ import time
 
 from bs4 import BeautifulSoup
 
-RELICS_DAY = int(os.environ.get("TRAVBOT_RELICS_DAY", "30"))
-WONDER_DAY = int(os.environ.get("TRAVBOT_WONDER_DAY", "50"))
-NATAR_ATTACK_DAY = WONDER_DAY + 10
+RELICS_DAY = int(os.environ.get("TRAVBOT_RELICS_DAY", "40"))
+WONDER_DAY = int(os.environ.get("TRAVBOT_WONDER_DAY", "80"))
 PHASES = ((WONDER_DAY, "wonder"), (RELICS_DAY, "relics"), (10, "growth"), (5, "second village"), (1, "opening"))
 CHECK_EVERY_S = 3 * 3600
 
@@ -71,5 +71,4 @@ class WorldClock:
 
     def info(self, client=None):
         d = self.day(client)
-        return {"day": d, "phase": phase(d), "relics_day": RELICS_DAY, "wonder_day": WONDER_DAY,
-                "natar_attack_day": NATAR_ATTACK_DAY}
+        return {"day": d, "phase": phase(d), "relics_day": RELICS_DAY, "wonder_day": WONDER_DAY}

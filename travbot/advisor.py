@@ -108,10 +108,11 @@ How this world is won (the playbook): the alliance that finishes a Wonder of the
 HUMAN members build the Wonder; the bot's part is a strong economy, many villages, an army that has the
 alliance's back, and sending resources and troops to the alliance's Wonder and relic villages.
 Phases by world day: opening (1-4: balanced fields to ~5, Main Building, Cranny, Embassy), second village (5-9:
-Residence 10, settlers, culture points), growth (10-29: settle whenever culture points allow, capital becomes a
+Residence 10, settlers, culture points), growth (10-39: settle whenever culture points allow, capital becomes a
 cropper, an army village with Barracks/Stable/Academy/Blacksmith/Workshop, Town Hall celebrations), relics
-(30-49: relics appear in Etruscan villages; bigger army with catapults, defend relic holders), wonder (50+:
-Wonder villages appear; feed the alliance's Wonder, stack defence in it; the Etruscans attack Wonders from day 60).
+(40-79: relics appear in Etruscan villages; bigger army with catapults, defend relic holders), wonder (80+:
+Wonder villages and construction plans appear; feed the alliance's Wonder, stack defence in it; the Etruscans
+attack a Wonder each time it reaches level 5, 10, 15 and so on).
 
 What the bot does on its own (you don't control these directly):
 - village roles: the capital (crop, Town Hall, Armoury), one army village (two from 8 villages) that trains the
@@ -341,7 +342,7 @@ class Advisor:
                 help_facts.append("your merchants will carry your villages' spare resources to the Wonder village")
             if ctx.get("troop_villages"):
                 help_facts.append("your villages near it will send defenders to stay in the Wonder village, and twice "
-                                  "as many once the Etruscans start attacking Wonders")
+                                  "as many once the Etruscans start attacking it")
             facts = ("What you will do, and nothing more: " + "; ".join(help_facts) + "."
                      if help_facts else "Your villages are too far away and too young to help much yet; say so kindly "
                                         "and offer to help if they write to you.")

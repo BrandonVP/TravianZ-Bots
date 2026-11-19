@@ -122,7 +122,8 @@ DEFAULT_PLAN = {
         "sell_max_rarity": 3,         # spare Common/Uncommon/Rare go to the merchant; Epic+ are kept
         "auction": True,
         "min_gain": 2.0,              # bid only on a real upgrade (weighted stat points)
-        "gold_per_point": 30,         # most gold a weighted stat point is worth (merchant Rare ~150-300)
+        "gold_per_point": 30,         # most gold a weighted stat point is worth (merchant Rare ~150-300); bids are
+                                      # always the start price of a lot nobody has bid on (never bid up players)
         "max_capital_share": 0.25,    # a bid never above this share of the capital's gold
         "max_open_bids": 2,
         # three champions with jobs (travbot/champions.py): war / steward / guardian

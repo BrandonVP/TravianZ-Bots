@@ -41,7 +41,7 @@ from .humans import HumanAllies
 from .expand import Expansion
 from .raid import RaidBook, raider_choices, scout_unit, form_slot, dist as raid_dist
 from .champion import ChampionKeeper
-from .world import WorldClock, NATAR_ATTACK_DAY
+from .world import WorldClock
 from .intel import Hostiles
 from .army import Army
 from .roles import Roles, overlay
@@ -786,8 +786,7 @@ class Bot:
         except (requests.RequestException, GameError, ValueError, KeyError, TypeError) as e:
             log.warning("army failed: %s", e)
         try:
-            natars = bool(self.day and self.day >= NATAR_ATTACK_DAY)
-            all_actions += self.support.step(seen, self.coords, plan, self.humans.ally, natars)
+            all_actions += self.support.step(seen, self.coords, plan, self.humans.ally)
             # a member started a Wonder: a letter of congratulations and support (once per bot and Wonder)
             writer = self.diplomacy.writer if self.diplomacy else template_letter
             all_actions += self.support.letters(seen, self.coords, plan, self.humans.ally, writer, self.client.user)

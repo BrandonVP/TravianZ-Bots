@@ -290,7 +290,7 @@ def template_letter(kind, ctx):
                               if ctx["markets"] > 1 else "my merchants will carry what my village can spare to it")
         if ctx.get("troop_villages"):
             help_parts.append("my defenders will march to its walls and stay there - "
-                              "twice as many once the Etruscans march on the Wonders")
+                              "twice as many once the Etruscans start attacking it")
         if help_parts:
             help_line = "From today " + join_list(help_parts) + "."
         else:

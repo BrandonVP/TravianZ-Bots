@@ -239,6 +239,9 @@ class ChampionKeeper:
         return {"action": "champion", "name": "quest", "reason": f"tier {o['tier']}, {o['seconds'] // 60} min"}
 
     def _bid(self, base, inv, weights, cfg):
+        """Bid on the best-value upgrade nobody has bid on, at its start price only (Brandon 2026-11-19: "dont bid
+        up items against real players"). A lot with any bid is left alone, and the game's proxy bidding never raises
+        a bot's bid past the start price, so a player who bids more always takes the lot."""
         html = self.client.get(base + "&t4tab=auction")
         a = page_data(html, "tz-auc")
         if not a or a["my_bids"] >= cfg["max_open_bids"]:
@@ -248,13 +251,13 @@ class ChampionKeeper:
         cap_total = int(a["capital_gold"] * cfg["max_capital_share"])
         best = None
         for lot in a["lots"]:
-            if lot["mine"] or lot["leading"] or not lot["slot"] or not self.fits(lot, family):
+            if lot["mine"] or lot["has_bid"] or not lot["slot"] or not self.fits(lot, family):
                 continue
             gain = self.score(lot, weights, worn) - self.score(worn.get(lot["slot"]), weights, worn)
             if gain < cfg["min_gain"]:
                 continue
             limit = min(cap_total, int(gain * cfg["gold_per_point"]))
-            need = lot["price"] + (1 if lot["has_bid"] else 0)
+            need = lot["price"]
             if need > limit:
                 continue
             if not best or gain / max(1, need) > best[0]:
@@ -262,6 +265,8 @@ class ChampionKeeper:
         if not best:
             return None
         _, lot, limit, gain = best
-        self._post(base + "&t4tab=auction", {"t4action": "bid", "aucid": str(lot["id"]), "maxbid": str(limit)},
-                   f"bid on lot {lot['id']} (item {lot['item']}, +{gain:.1f}) up to {limit} gold, price now {lot['price']}")
-        return {"action": "champion", "name": f"bid on item {lot['item']}", "reason": f"up to {limit} gold for +{gain:.1f}"}
+        self._post(base + "&t4tab=auction", {"t4action": "bid", "aucid": str(lot["id"]), "maxbid": str(lot["price"])},
+                   f"bid on lot {lot['id']} (item {lot['item']}, +{gain:.1f}) at its start price {lot['price']} gold "
+                   f"(worth up to {limit})")
+        return {"action": "champion", "name": f"bid on item {lot['item']}",
+                "reason": f"{lot['price']} gold for +{gain:.1f}, start price only"}

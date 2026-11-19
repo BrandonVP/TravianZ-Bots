@@ -89,9 +89,11 @@ with a Champion's Hall. The game prints a JSON copy of the Champion's Hall pages
 4. **Spare gear** up to `champion.sell_max_rarity` (default Rare) that is worse than what is worn goes to the merchant.
 5. **Quest:** the longest offer whose worst health loss still leaves `champion.quest_health_margin`; none below
    `champion.quest_min_health`; 6-8 h expeditions only from `champion.expedition_min_health`.
-6. **Auction House:** one bid per round on the best-value real upgrade (at least `champion.min_gain` weighted points),
-   maximum bid = gain x `champion.gold_per_point`, never above `champion.max_capital_share` of the capital's gold,
-   at most `champion.max_open_bids` at a time. The game holds the maximum from the capital until outbid.
+6. **Auction House:** one bid per round on the best-value real upgrade (at least `champion.min_gain` weighted points)
+   that nobody has bid on yet, at the start price, when that price is at most gain x `champion.gold_per_point` and
+   `champion.max_capital_share` of the capital's gold; at most `champion.max_open_bids` at a time. The bots never
+   bid up a lot: a lot with anyone's bid is left alone, and their own bid is the start price only, so a player who
+   bids more takes the lot (Brandon 2026-11-19: "dont bid up items against real players").
 The champion is never trained by the bot; a bot without one skips all of this.
 
 The game has the final word: the bot only follows links and forms the game offers.
@@ -99,7 +101,7 @@ The game has the final word: the bot only follows links and forms the game offer
 ## Playing to win (plan `Claude/plans/2026-11-13-smarter-bots.md`, decided by Brandon 2026-11-13)
 
 The bots follow a playbook by world phase (`travbot/world.py`, from the game's "Days since start"): opening
-(days 1-4), second village (5-9), growth (10-29), relics (30-49), wonder (50+). The advisor's prompt carries the
+(days 1-4), second village (5-9), growth (10-39), relics (40-79), wonder (80+). The advisor's prompt carries the
 playbook; its plan applies to every village and the village **roles** add their own buildings in front:
 
 - **capital**: cropper, Town Hall, Armoury, wall; **army** (one village, two from 8 villages): Barracks, Stable,
@@ -126,8 +128,9 @@ written afterwards from what was really done. Requested scouting is reported bac
 
 **Wonder and relics** (`wonder`): the humans build the Wonder. When the game's alliance feed marks a member's
 village as holding the Wonder (`ww`) or relics, bot villages ship what they hold above `keep_share` to the
-nearest Wonder and move `troop_share` of their spare defenders into it (doubled from the day the Etruscans attack
-Wonders); relic villages get a smaller garrison. The bots build no Treasury and take no relics themselves.
+nearest Wonder and move `troop_share` of their spare defenders into it (doubled once the Wonder reaches level 5,
+when the Etruscans start attacking it, or when an Etruscan attack is on its way); relic villages get a smaller
+garrison. The bots build no Treasury and take no relics themselves.
 
 Game side (dev 2026-11-13): `GameEngine/BotFeed.php` adds `ww`, `ww_level` and `relics` to each village of
 `ajax.php?f=tzbot&a=ally`.

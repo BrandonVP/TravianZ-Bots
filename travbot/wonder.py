@@ -8,10 +8,12 @@ resources  every bot village with a Marketplace and free merchants ships what it
            `wonder.keep_share` of its storage to the nearest alliance Wonder (bots never build it themselves);
 troops     bot villages within `wonder.radius` move `wonder.troop_share` of their defenders above
            `defense.reinforce_keep` into the Wonder village, at most once per `wonder.troop_every_hours` per
-           village; from the day the Etruscans attack Wonders the share doubles;
+           village; the share doubles for a Wonder at level ETRUSCAN_LEVEL or more, or with an Etruscan attack on
+           its way (the game sends Etruscan waves when a Wonder finishes level 5, 10, 15 ... 95 and 96-99 -
+           GameEngine/Automation/AutomationBuildQueue.php; was: from a fixed world day, 2026-11-19);
 relics     a member's village holding a relic gets a garrison the same way (`wonder.relic_share`).
 letter     when a human member starts building a Wonder (level 1 or more), each bot writes them once: congratulations,
-           and exactly the help that bot gives - shipments, defenders, more of them when the Etruscans march
+           and exactly the help that bot gives - shipments, defenders, more of them once the Etruscans attack it
            (Brandon 2026-11-19). Some minutes after the bot first sees it, and only while the bots are "awake".
 Attacks on these villages are also answered by the normal reinforcement (Bot.reinforce).
 """
@@ -26,6 +28,8 @@ from . import rules
 
 log = logging.getLogger("travbot")
 _LOCK = threading.Lock()
+ETRUSCANS_UID = 3      # the Etruscans' (Natars') account
+ETRUSCAN_LEVEL = 5     # the first Wonder level that brings Etruscan attack waves
 
 
 def wonder_villages(feed):
@@ -66,7 +70,16 @@ class Support:
             tmp.write_text(json.dumps(self.sent), encoding="utf-8")
             tmp.replace(self.path)
 
-    def step(self, villages, coords, plan, feed, natars_attacking):
+    @staticmethod
+    def under_threat(wonder, feed):
+        """True when the Etruscans attack this Wonder: it reached their first attack level, or their troops are
+        on the way to it (the feed lists attacks coming in on members' villages, with the sender)."""
+        if int(wonder.get("level") or 0) >= ETRUSCAN_LEVEL:
+            return True
+        return any(int(a.get("to") or 0) == int(wonder["wref"]) and int(a.get("from_owner") or 0) == ETRUSCANS_UID
+                   for a in (feed or {}).get("incoming", []))
+
+    def step(self, villages, coords, plan, feed):
         """villages: [{"id", "name", "state", "reserved"}]. Returns actions."""
         cfg = plan["wonder"]
         if not cfg["enabled"] or not feed:
@@ -78,8 +91,8 @@ class Support:
         actions = []
         if wonders:
             actions += self._resources(villages, coords, cfg, wonders)
-        share = cfg["troop_share"] * (2 if natars_attacking else 1)
         for t in wonders:
+            share = cfg["troop_share"] * (2 if self.under_threat(t, feed) else 1)
             actions += self._troops(villages, coords, plan, t, share, "Wonder")
         for t in relics:
             actions += self._troops(villages, coords, plan, t, cfg["relic_share"], "relic")
