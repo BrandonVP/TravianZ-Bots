@@ -12,12 +12,14 @@ Players' villages are scouted before the first raid (farms: every `rescout_hours
 mark the target "defended" for `block_days`. A raid with losses blocks the target for `block_days`,
 one where every raider died blocks it for good. Wave size adapts to the loot: full carry -> about
 50% more next time (up to `max_wave`), half empty -> fewer. A target is raided again after
-`cooldown_hours`, longer when the last raid brought little.
+`cooldown_hours`, longer when the last raid brought little (a day after an almost empty one), and not while
+another bot raided it within `cooldown_hours`.
 
 Everything here is pure bookkeeping on `raid.json` in the bot's state folder; main.py does the I/O.
 """
 import json
 import math
+import threading
 import time
 
 from . import units
@@ -27,6 +29,13 @@ RAIDERS = {1: [5, 3, 1], 2: [16, 13, 11], 3: [24, 22]}
 SCOUTS = {1: 4, 2: 14, 3: 23}
 
 DAY = 86400
+POOR_HAUL = 0.1             # a raid bringing back less than this share of what it could carry ...
+POOR_HAUL_WAIT_H = 24       # ... keeps that bot away this long
+
+# Raids by every bot in this process (main.py runs each account in its own thread): target -> (time, book).
+# Without it two bots raided the same inactive village one after the other and the second came back empty.
+_RAIDED = {}
+_RAIDED_LOCK = threading.Lock()
 REPORT_GRACE_S = 3 * 3600   # a send without a report after this long no longer counts as out (+ trip time)
 
 
@@ -53,6 +62,11 @@ class RaidBook:
         for k, v in (("villages", {}), ("targets", {}), ("out", []), ("seen_reports", []),
                      ("oases", {}), ("scanned", 0), ("totals", {})):
             self.data.setdefault(k, v)
+        self.owner = str(self.path)
+        with _RAIDED_LOCK:   # after a restart the other bots still know what this one raided
+            for key, t in self.data["targets"].items():
+                if t.get("wave") and t.get("last_sent") and t["last_sent"] > _RAIDED.get(key, (0, ""))[0]:
+                    _RAIDED[key] = (t["last_sent"], self.owner)
 
     def save(self):
         tmp = self.path.with_suffix(".tmp")
@@ -140,6 +154,9 @@ class RaidBook:
             t = self.data["targets"].get(key, {})
             if t.get("blocked_until", 0) > now or now < t.get("next", 0):
                 continue
+            other = _RAIDED.get(key)
+            if other and other[1] != self.owner and now - other[0] < cfg["cooldown_hours"] * 3600:
+                continue   # another bot raided it lately: it is empty until it refills
             if kind == "oasis":
                 action = "raid"
             else:
@@ -187,6 +204,8 @@ class RaidBook:
         t = self.data["targets"].setdefault(key, {})
         if action == "raid":
             t["wave"] = count
+            with _RAIDED_LOCK:
+                _RAIDED[key] = (now, self.owner)
         t["last_sent"] = now
 
     def learn(self, rep, raider_ids, scout_id, cfg, now=None):
@@ -221,8 +240,9 @@ class RaidBook:
         if dead:
             t["blocked_until"] = now + cfg["block_days"] * DAY
             return f"raid on {key}: lost {dead}/{sent}, loot {rep['loot']}/{rep['carry']} - blocked {cfg['block_days']} days"
-        # come back when the storage has refilled: sooner after a full carry
-        t["next"] = now + trip + cfg["cooldown_hours"] * 3600 * (2.0 - min(1.0, ratio))
+        # come back when the storage has refilled: sooner after a full carry, a day later after an empty one
+        wait_h = POOR_HAUL_WAIT_H if ratio < POOR_HAUL else cfg["cooldown_hours"] * (2.0 - min(1.0, ratio))
+        t["next"] = now + trip + wait_h * 3600
         return f"raid on {key}: loot {rep['loot']}/{rep['carry']} ({ratio:.0%})"
 
     def forget_old(self, now=None):

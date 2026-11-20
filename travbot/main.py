@@ -293,7 +293,7 @@ class Bot:
                     if av.get("coords") and not (av.get("incoming") or {}).get("attacks") \
                             and rules.is_young(st, richest, sp):
                         x, y = av["coords"]
-                        young.append({"id": tile_id(x, y), "name": f"{a.get('account')}'s {av['name']}",
+                        young.append({"id": tile_id(x, y), "name": _owned(a.get('account'), av['name']),
                                       "x": x, "y": y, "state": st, "ally": True})
         actions = []
         for r in young:
@@ -347,7 +347,7 @@ class Bot:
         targets = [{"name": v["name"], "coords": self.coords.get(v["id"]), "incoming": v["state"]["incoming"]}
                    for v in villages]
         for a in self.allies:
-            targets += [{"name": f"{a.get('account')}'s {v['name']}", "coords": v.get("coords"),
+            targets += [{"name": _owned(a.get('account'), v['name']), "coords": v.get("coords"),
                          "incoming": v.get("incoming") or {}} for v in a.get("villages", [])]
         if d.get("reinforce_humans", True):
             targets += self.humans.targets(self.client.user)
@@ -837,6 +837,11 @@ def _alliance_summary(feed):
     return {"name": feed["alliance"].get("name"), "members": len(members),
             "humans": sum(1 for m in members if not m.get("bot")),
             "wonders": len(wonder_villages(feed)), "relics": len(relic_villages(feed))}
+
+
+def _owned(account, village):
+    """ "AIBot's village 3", not "AIBot's AIBot's village 3": default village names already carry the owner."""
+    return village if village.startswith(f"{account}'s") else f"{account}'s {village}"
 
 
 def run_bot(state_dir, args, ready):

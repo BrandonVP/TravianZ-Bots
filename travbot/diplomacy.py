@@ -120,6 +120,9 @@ class Diplomacy:
             html = client.post("allianz.php", {"s": 5, "o": 4, "a": 4, "a_name": name, "s1": "ok"})
             err = parse.parse_form_error(html)
             st["invited"][name] = now
+            if err and "already in this alliance" in err.lower():
+                st["members"] = st["members"] + [name]   # the member list missed them: nothing to do
+                continue
             if err and "already invited" not in err.lower():
                 return f"invitation to {name} refused: {err}"
             subject, text = self.writer("invite", {"me": self.me, "to": name, "alliance": cfg["name"],

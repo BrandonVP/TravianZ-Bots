@@ -458,8 +458,13 @@ def parse_embassy(html):
 
 
 def parse_alliance_members(html):
-    """Player names in the alliance overview's member table (empty if not in an alliance)."""
-    table = _soup(html).find("table", id="member")
+    """Player names in the alliance overview's member list (empty if not in an alliance). The redesigned page
+    lists div.tz-ally-member blocks (name link in .tz-ally-mname); the original one a table#member with td.pla."""
+    soup = _soup(html)
+    names = [a.get_text(strip=True) for a in soup.select("div.tz-ally-member .tz-ally-mname a[href*='spieler.php']")]
+    if names:
+        return names
+    table = soup.find("table", id="member")
     if table is None:
         return []
     return [td.get_text(strip=True) for td in table.find_all("td", class_="pla")]
