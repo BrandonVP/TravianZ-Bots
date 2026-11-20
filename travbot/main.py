@@ -12,7 +12,8 @@ Environment:
   TRAVBOT_MAIL_MODELS         models for letters (default: TRAVBOT_ADVISOR_MODELS) - a small fast one is enough
   TRAVBOT_IDLE_URL            idle check (default http://192.168.68.87:8911/idle.json; empty = always-on Ollama server)
   TRAVBOT_OLLAMA_YIELD        1 = skip a review while Ollama has another model loaded (default); 0 = shared server, just ask
-  TRAVBOT_ADVISOR_MODELS      comma-separated, tried in order (default gemma4:26b,ornith:9b)
+  TRAVBOT_ADVISOR_MODELS      comma-separated, tried in order (default gemma4:26b,ornith:9b); "strata" = the Strata
+                              server (travbot/llm.py: TRAVBOT_STRATA_URL, key in secrets/strata_key)
   TRAVBOT_ADVISOR_INTERVAL_MIN  minutes between successful reviews (default 60)
   TRAVBOT_ADVISOR_RETRY_MIN     minutes between attempts while the PC is busy (default 10)
   TRAVBOT_WEB_PORT            status page port inside the container (default 8080; 0 disables)

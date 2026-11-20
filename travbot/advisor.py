@@ -10,6 +10,7 @@ import time
 
 import requests
 
+from . import llm
 from . import plan as planmod
 from .names import display, display_text
 
@@ -300,6 +301,8 @@ class Advisor:
         try:
             loaded = [m["name"] for m in requests.get(f"{self.ollama}/api/ps", timeout=5).json().get("models", [])]
         except (requests.RequestException, ValueError) as e:
+            if llm.uses_strata(self.models):   # Strata answers on its own server: Ollama down is no reason to wait
+                return True, "idle (Ollama unreachable, Strata first)"
             return False, f"Ollama unreachable ({type(e).__name__})"
         others = [m for m in loaded if m not in self.models]
         if others and self.yield_to_others:
@@ -308,18 +311,13 @@ class Advisor:
         return True, "idle"
 
     def _ask(self, model, status, current_plan):
-        r = requests.post(f"{self.ollama}/api/chat", timeout=self.timeout_s, json={
-            "model": model,
-            "stream": False,
-            "think": False,
-            "format": PLAN_SCHEMA,
-            "keep_alive": 0,  # unload right after answering: give the GPU straight back
-            "options": {"temperature": 0.3, "num_ctx": 8192, "num_predict": 3000},  # cap: small models can run away on a strict format
-            "messages": [{"role": "system", "content": display_text(system_prompt(self.tribe))},
-                         {"role": "user", "content": _summary(status, current_plan)}],
-        })
-        r.raise_for_status()
-        return json.loads(r.json()["message"]["content"])
+        return json.loads(llm.chat(
+            self.ollama, model,
+            [{"role": "system", "content": display_text(system_prompt(self.tribe))},
+             {"role": "user", "content": _summary(status, current_plan)}],
+            PLAN_SCHEMA, timeout=self.timeout_s,
+            keep_alive=0,  # Ollama: unload right after answering, give the GPU straight back
+            temperature=0.3, num_ctx=8192, num_predict=3000))  # cap: small models can run away on a strict format
 
     def letter(self, kind, ctx):
         """An in-game letter written by the local model: (subject, text), or None if the PC is busy/off."""
@@ -358,12 +356,8 @@ class Advisor:
         task += " Sign with your name. Keep the text under 600 characters and the subject under 50."
         for model in self.models:
             try:
-                r = requests.post(f"{self.ollama}/api/chat", timeout=180, json={
-                    "model": model, "stream": False, "think": False, "format": LETTER_SCHEMA, "keep_alive": 0,
-                    "options": {"temperature": 0.8, "num_ctx": 2048, "num_predict": 600},
-                    "messages": [{"role": "user", "content": task}]})
-                r.raise_for_status()
-                out = json.loads(r.json()["message"]["content"])
+                out = json.loads(llm.chat(self.ollama, model, [{"role": "user", "content": task}], LETTER_SCHEMA,
+                                          timeout=180, keep_alive=0, temperature=0.8, num_ctx=2048, num_predict=600))
                 subject, text = str(out["subject"]).strip()[:50], str(out["text"]).strip()[:1500]
                 if subject and text:
                     return subject, text

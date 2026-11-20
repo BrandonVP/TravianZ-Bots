@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 import requests as http
 
-from . import combat, rules, units
+from . import combat, llm, rules, units
 
 log = logging.getLogger("travbot")
 _LOCK = threading.Lock()
@@ -75,13 +75,12 @@ class Requests:
         written = {(int(a), int(b)) for a, b in COORDS.findall(body or "")}
         for model in self.models:
             try:
-                r = http.post(f"{self.ollama}/api/chat", timeout=300, json={
-                    "model": model, "stream": False, "think": False, "format": REQ_SCHEMA, "keep_alive": "10m",
-                    "options": {"temperature": 0, "num_ctx": 4096, "num_predict": 400},
-                    "messages": [{"role": "system", "content": READ_PROMPT},
-                                 {"role": "user", "content": f"From {sender}, subject \"{subject}\":\n{body}"}]})
-                r.raise_for_status()
-                out = json.loads(r.json()["message"]["content"]).get("requests") or []
+                content = llm.chat(self.ollama, model,
+                                   [{"role": "system", "content": READ_PROMPT},
+                                    {"role": "user", "content": f"From {sender}, subject \"{subject}\":\n{body}"}],
+                                   REQ_SCHEMA, timeout=300, keep_alive="10m", temperature=0, num_ctx=4096,
+                                   num_predict=400)
+                out = json.loads(content).get("requests") or []
                 clean = []
                 for q in out[:4]:
                     if not isinstance(q, dict) or q.get("type") not in REQ_SCHEMA["properties"]["requests"]["items"][

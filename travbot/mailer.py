@@ -22,6 +22,8 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
+from . import llm
+
 log = logging.getLogger(__name__)
 
 MAIL_EVERY_S = 10 * 60
@@ -166,13 +168,12 @@ class Mailer:
                  f"Then stay in character: friendly, plain English, under 500 characters, no lists. Sign exactly as {self.me}.")
         for model in self.models:
             try:
-                r = requests.post(f"{self.ollama}/api/chat", timeout=420, json={
-                    "model": model, "stream": False, "think": False, "format": REPLY_SCHEMA, "keep_alive": "10m",
-                    "options": {"temperature": 0.7, "num_ctx": 2048, "num_predict": 600},
-                    "messages": [{"role": "system", "content": who + facts + self._facts() + style},
-                                 {"role": "user", "content": task}]})
-                r.raise_for_status()
-                text = str(json.loads(r.json()["message"]["content"])["text"]).strip().strip('{}"').strip()
+                content = llm.chat(self.ollama, model,
+                                   [{"role": "system", "content": who + facts + self._facts() + style},
+                                    {"role": "user", "content": task}],
+                                   REPLY_SCHEMA, timeout=420, keep_alive="10m", temperature=0.7, num_ctx=2048,
+                                   num_predict=600)
+                text = str(json.loads(content)["text"]).strip().strip('{}"').strip()
                 if 20 <= len(text) <= 1500:
                     return text
             except (requests.RequestException, ValueError, KeyError) as e:

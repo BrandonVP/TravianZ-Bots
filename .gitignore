@@ -12,3 +12,6 @@ venv/
 sentry/
 RESTART
 hostiles.json
+
+# the Strata server API key (travbot/llm.py) - never committed
+secrets/
