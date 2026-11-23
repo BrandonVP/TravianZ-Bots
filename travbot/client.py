@@ -60,6 +60,7 @@ class GameClient:
         self._pace()
         r = self.session.request(method, urljoin(self.base, path), data=data, timeout=self.timeout)
         r.raise_for_status()
+        self.last_url = r.url  # after redirects
         return r.text
 
     def _call(self, method, path, data=None):
@@ -78,6 +79,12 @@ class GameClient:
 
     def post(self, path, data):
         return self._call("POST", path, data)
+
+    def world_won(self):
+        """True once a Wonder of the World reached level 100: the game then sends the Rally Point (and every
+        other build/send page) to winner.php, so no order can go through any more."""
+        self.get("build.php?id=39")
+        return self.last_url.split("?")[0].endswith("/winner.php")
 
     # --- villages -------------------------------------------------------------
 

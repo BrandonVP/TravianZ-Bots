@@ -53,6 +53,7 @@ from .champions import ChampionPlan
 log = logging.getLogger("travbot")
 
 MIN_SLEEP, MAX_SLEEP, IDLE_SLEEP, ERROR_SLEEP = 60, 15 * 60, 10 * 60, 120
+WORLD_OVER_SLEEP = 30 * 60   # once the world is won: look again every 30 min (a reset brings a new world)
 ATTACK_SLEEP = 120  # check more often while an attack is incoming
 REINFORCE_COOLDOWN_S = 3600  # one round of help per attacked village per hour
 REINFORCE_NOTE_S = 6 * 3600   # the "help is on the way" letter: once per attacked village per 6 hours
@@ -893,7 +894,24 @@ def run_bot(state_dir, args, ready):
 
     force_advice = args.advise_now
     history = []
+    world_over_logged = False
     while True:
+        # A Wonder at level 100 ends the world: every order would only bounce to winner.php, so sit it out.
+        try:
+            won = client.world_won()
+        except Exception:  # a failed check must not stop the bot; the tick below reports real trouble
+            won = False
+        if won:
+            if not world_over_logged:
+                log.info("the world has been won (a Wonder reached level 100): no more orders, checking again every %d min",
+                         WORLD_OVER_SLEEP // 60)
+                world_over_logged = True
+            if args.once:
+                return
+            time.sleep(WORLD_OVER_SLEEP)
+            continue
+        world_over_logged = False
+
         plan, source = planmod.load(state_dir / "plan.json", max_age)
         status = None
         try:
