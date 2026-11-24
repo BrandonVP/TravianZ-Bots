@@ -36,7 +36,7 @@ from . import plan as planmod
 from . import rules, units, web
 from .advisor import Advisor
 from .mailer import Mailer
-from .client import GameClient, GameError, tile_id
+from .client import GameClient, GameError, WorldNotOpen, tile_id
 from .diplomacy import Diplomacy, join_list, template_letter
 from .humans import HumanAllies
 from .expand import Expansion
@@ -53,6 +53,7 @@ from .champions import ChampionPlan
 log = logging.getLogger("travbot")
 
 MIN_SLEEP, MAX_SLEEP, IDLE_SLEEP, ERROR_SLEEP = 60, 15 * 60, 10 * 60, 120
+PRESTART_SLEEP = 60          # before the world opens: try again every minute, so the bots start right at launch
 WORLD_OVER_SLEEP = 30 * 60   # once the world is won: look again every 30 min (a reset brings a new world)
 ATTACK_SLEEP = 120  # check more often while an attack is incoming
 REINFORCE_COOLDOWN_S = 3600  # one round of help per attacked village per hour
@@ -677,6 +678,18 @@ class Bot:
 
     def tick(self, plan):
         """One round over all villages. Returns (status_villages, actions, sleep_seconds)."""
+        task_actions = []
+        try:  # finished tasks first: the rewards land in the first village and can be spent this round
+            for key, paid in self.client.claim_tasks(self.dry_run):
+                log.info("task reward %s: %s", key, paid or "claimed")
+                task_actions.append({"action": "task", "name": f"task {key}", "village": "",
+                                     "reason": paid or "claimed", "time": int(time.time())})
+        except (requests.RequestException, ValueError, KeyError) as e:
+            log.warning("claiming task rewards failed: %s", e)
+        except GameError as e:
+            if isinstance(e, WorldNotOpen):
+                raise
+            log.warning("claiming task rewards failed: %s", e)
         first = self.client.village()
         villages = first["villages"] or [{"id": None, "name": "village", "x": None, "y": None, "current": True}]
         if time.time() - self.capital_checked > 6 * 3600:  # the capital rarely changes
@@ -723,7 +736,7 @@ class Bot:
                     self.coords[v["id"]] = self.client.coordinates()
                 except (requests.RequestException, GameError, ValueError):
                     pass
-        out, all_actions, soon, seen = [], [], [], []
+        out, all_actions, soon, seen = [], list(task_actions), [], []
         for v in villages:
             self.vname = v["name"]
             if v["id"] is not None:
@@ -895,12 +908,24 @@ def run_bot(state_dir, args, ready):
     force_advice = args.advise_now
     history = []
     world_over_logged = False
+    prestart_logged = False
     while True:
         # A Wonder at level 100 ends the world: every order would only bounce to winner.php, so sit it out.
         try:
             won = client.world_won()
+        except WorldNotOpen:  # before the start: no login form yet; look again every minute
+            if not prestart_logged:
+                log.info("the world has not opened yet: trying again every %d s", PRESTART_SLEEP)
+                prestart_logged = True
+            if args.once:
+                return
+            time.sleep(PRESTART_SLEEP)
+            continue
         except Exception:  # a failed check must not stop the bot; the tick below reports real trouble
             won = False
+        if prestart_logged:
+            log.info("the world is open: starting")
+            prestart_logged = False
         if won:
             if not world_over_logged:
                 log.info("the world has been won (a Wonder reached level 100): no more orders, checking again every %d min",
@@ -932,6 +957,8 @@ def run_bot(state_dir, args, ready):
                 write_json(state_dir / "status.json", status)
             log.info("tick done: %d order(s) in %d village(s), plan=%s, next tick in %ds",
                      len(actions), len(villages), source, sleep)
+        except WorldNotOpen:  # reset while running: wait for the start like above
+            sleep = PRESTART_SLEEP
         except Exception as e:  # one account's failure must not stop its thread (or the other bots)
             log.exception("tick failed: %s", e)
             sleep = ERROR_SLEEP

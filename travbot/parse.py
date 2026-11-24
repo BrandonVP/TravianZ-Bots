@@ -43,6 +43,37 @@ def is_login_page(html):
     return 'name="ft" value="a4"' in html
 
 
+def is_prestart_page(html):
+    """The login page before the world opens (COMMENCE / START_TIME not reached): a message or a countdown
+    where the login form would be. Logging in cannot work until it goes away."""
+    return 'class="og-card og-login"' in html and not is_login_page(html)
+
+
+def parse_task_claims(html):
+    """Rewards ready on tasks.php: [(claim key, checker)] in page order - tasks ('12') and chests ('chest10')."""
+    out = []
+    for form in _soup(html).select("form.tzt-claim"):
+        key, chk = form.find("input", attrs={"name": "claim"}), form.find("input", attrs={"name": "c"})
+        if key and key.get("value") and chk is not None:
+            out.append((key["value"], chk.get("value", "")))
+    return out
+
+
+def parse_task_result(html):
+    """What a claim paid, as the page tells the player: the one-line message, or the reveal popup's
+    title and reward chips (chests and item rewards). '' when the page shows neither."""
+    soup = _soup(html)
+    msg = soup.select_one("p.tzt-msg")
+    if msg:
+        return msg.get_text(" ", strip=True)
+    box = soup.select_one(".tzt-reveal")
+    if box:
+        title = box.find("h2")
+        chips = [c.get_text(" ", strip=True) for c in box.select(".tzt-chip")]
+        return ((title.get_text(" ", strip=True) + ": ") if title else "") + ", ".join(c for c in chips if c)
+    return ""
+
+
 def parse_resources(soup):
     """Stock, capacity and hourly production from the resource bar (present on every page)."""
     out = {}

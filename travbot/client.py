@@ -17,6 +17,10 @@ class GameError(Exception):
     pass
 
 
+class WorldNotOpen(GameError):
+    """The world has not started yet (the login page shows a message or a countdown instead of the form)."""
+
+
 def tile_id(x, y, world_max=WORLD_MAX):
     """Map tile id (wref) for coordinates, as Generator::getBaseID()."""
     return (world_max - y) * (world_max * 2 + 1) + (world_max + x + 1)
@@ -50,6 +54,8 @@ class GameClient:
         r = self.session.post(urljoin(self.base, "login.php"), timeout=self.timeout, data={
             "ft": "a4", "user": self.user, "pw": self.password, "s1": "login"})
         r.raise_for_status()
+        if parse.is_prestart_page(r.text):
+            raise WorldNotOpen("the world has not opened yet")
         if parse.is_login_page(r.text):
             raise GameError("login failed (wrong credentials, banned or vacation mode?)")
         log.info("logged in as %s", self.user)
@@ -67,6 +73,8 @@ class GameClient:
         """Request a page, logging in again (and reselecting the village) if the session expired."""
         for attempt in (1, 2):
             text = self._request(method, path, data)
+            if parse.is_prestart_page(text):  # before the start every page lands here; once it opens, the form is back
+                raise WorldNotOpen("the world has not opened yet")
             if not parse.is_login_page(text):
                 return text
             if attempt == 1:
@@ -85,6 +93,29 @@ class GameClient:
         other build/send page) to winner.php, so no order can go through any more."""
         self.get("build.php?id=39")
         return self.last_url.split("?")[0].endswith("/winner.php")
+
+    # --- tasks ----------------------------------------------------------------
+
+    def claim_tasks(self, dry_run=False, limit=40):
+        """Collect every finished task and opened chest on tasks.php (Taskmaster). Returns [(key, what it paid)].
+        The game checks each goal again on the claim; a claim it refuses ends the run (no retry loop)."""
+        html = self.get("tasks.php")
+        ready = parse.parse_task_claims(html)
+        if dry_run:
+            return [(key, "ready (dry run)") for key, _ in ready]
+        done, tried = [], set()
+        while ready and len(done) < limit:
+            key, chk = ready[0]
+            if key in tried:
+                break
+            tried.add(key)
+            html = self.post("tasks.php", {"claim": key, "tab": "village", "c": chk})
+            msg = parse.parse_task_result(html)
+            if "not ready" in msg:
+                break
+            done.append((key, msg))
+            ready = parse.parse_task_claims(html)
+        return done
 
     # --- villages -------------------------------------------------------------
 
