@@ -129,8 +129,9 @@ What the bot does on its own (you don't control these directly):
 Your plan applies to every village; the roles add on top.
 
 You do not act directly. You write a plan that a rules engine follows until your next review (about an hour):
-- resource_weights (0-10 each): higher = the bot upgrades that resource's fields sooner. The bot picks the
-  resource with the lowest production divided by its weight.
+- resource_weights (0-10 each, keep them near 1): the bot upgrades a field of the resource it has least of in
+  stock (stock divided by its weight) and never the one it has most of; a higher weight makes a resource count as
+  scarcer. Crop does not need a high weight: min_net_crop already puts cropland first when net crop runs low.
 - field_max_level (1-25): fields are not upgraded past this level (every village on this server can reach 25;
   levels above 10 get expensive quickly). A village that has reached it, has no building targets left and is
   more than half full keeps upgrading fields anyway, so a low value never leaves resources unused.
@@ -154,8 +155,11 @@ You do not act directly. You write a plan that a rules engine follows until your
   the time left (10 gold for a few minutes, 25 for 1 h, 100 for 8 h, 200 for a day, 700 for a week), so only good
   value is bought: at most max_finish_price (10-1000) per job and at least min_minutes_per_gold (0-60) minutes saved
   per gold, best value first (gold nearly full: price limit x2, value bar /2); every village keeps
-  `reserve` gold, the capital keeps `capital_reserve` (the capital pays the weekly Plus + production bonus
-  renewals, about 5,500 gold a week); max_per_tick (0-10) finishes per village per round.
+  `reserve` (0-2000) gold; max_per_tick (0-10) finishes per village per round. capital_reserve is not used.
+  The capital also keeps +25% production running (1,000 gold for 7 days, on the resource with the lowest production)
+  and keeps the gold its renewals need; an NPC trade (250 gold, needs a Marketplace) rebalances the stock when the
+  next build waits a long time on one resource. These run on their own; production_bonus and npc (true/false)
+  can switch them off.
 - share: enabled (true/false); a village producing less than young_ratio (0-1) of the richest village is "young"
   and gets resources from the richest villages that have a Marketplace, up to fill_to (0.1-1) of its storage;
   a donor never drops below donor_keep_share (0-0.95) of its storage; shipments under min_shipment are skipped.
@@ -174,8 +178,8 @@ Construction requirements (a building cannot be started before these are met; th
 - Sawmill / Brickyard / Iron Foundry: Main Building 5 and a Woodcutter / Clay Pit / Iron Mine at level 10.
 Only include a target when its requirements are met now or will be met by earlier targets/fields soon.
 
-Guidance: balanced fields early; keep net crop comfortably positive because buildings, fields and troops add
-upkeep; Main Building levels speed up all construction; a Cranny hides resources from raids; keep a modest
+Guidance: balanced fields early (the bot raises the resource that is shortest); keep net crop positive because
+buildings, fields and troops add upkeep (a min_net_crop of 10-30 does that); Main Building levels speed up all construction; a Cranny hides resources from raids; keep a modest
 defence early and raise it if attacks were seen; expansion is a long-term goal once the economy is solid
 and is limited by culture points (every building level adds some).
 A Treasury (Main Building 10) hides village gold from raiders: the roles give the capital Treasury 10 and the
@@ -393,11 +397,7 @@ class Advisor:
                 log.warning("advisor model %s failed: %s", model, e)
                 continue
             clean = planmod.validate(raw)
-            # the never-raid list can only grow: a model once dropped the bots' own names from it
-            old_ex = list(((current_plan or {}).get("raid") or {}).get("exclude") or [])
-            new_ex = list((clean.get("raid") or {}).get("exclude") or [])
-            if "raid" in clean:
-                clean["raid"]["exclude"] = new_ex + [x for x in old_ex if x not in new_ex]
+            # raid.exclude is fixed to the system accounts by validate(); the other bots are never raided anyway
             clean.update(created=int(time.time()), source=f"llm:{model}", notes=str(raw.get("notes", ""))[:500])
             tmp = self.plan_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(clean, indent=2), encoding="utf-8")

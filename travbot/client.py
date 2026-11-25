@@ -150,6 +150,32 @@ class GameClient:
         """Send an in-game message to player `to`."""
         self.post("nachrichten.php", {"ft": "m2", "c": "3e9", "an": to, "be": subject[:60], "message": text, "s1": "ok"})
 
+    # --- production bonuses (capital's Town Center) and NPC trades ------------
+
+    BONUS_IDS = {"wood": 9, "clay": 10, "iron": 11, "crop": 12}   # plus.php?id=
+
+    def bonuses(self):
+        """{"left": {kind: seconds left}, "ids": {...}} from the Town Center, or None (not the capital)."""
+        return parse.parse_bonuses(self.get("build.php?gid=15"))
+
+    def buy_bonus(self, kind, ids=None):
+        """Buy (or extend) +25% production of `kind` with the capital's gold; returns the bonuses afterwards."""
+        pid = (ids or {}).get(kind) or self.BONUS_IDS[kind]
+        self.get(f"plus.php?id={pid}")    # redirects back to the Town Center
+        return self.bonuses()
+
+    def npc_form(self, slot):
+        """The NPC trade form of the Marketplace in `slot`: {"m1": [wood, clay, iron, crop]} (the stock the trade
+        is checked against), or None (no Marketplace, or too little gold)."""
+        return parse.parse_npc(self.get(f"build.php?id={slot}&t=3"))
+
+    def npc_trade(self, slot, m1, target):
+        """Redistribute the stock `m1` (from npc_form) to `target` {"wood", ...}; the totals must match."""
+        data = [("id", slot), ("ft", "mk3"), ("t", 3)]
+        data += [("m2[]", int(target[k])) for k in ("wood", "clay", "iron", "crop")]
+        data += [("m1[]", int(v)) for v in m1]
+        self.post("build.php", data)
+
     # --- marketplace ----------------------------------------------------------
 
     def market(self, slot):

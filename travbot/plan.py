@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 # list forever and crowd out real targets.
 MAX_LEVEL = {"Sawmill": 5, "Brickyard": 5, "Iron Foundry": 5, "Grain Mill": 5, "Bakery": 5, "Brewery": 10}
 
+SYSTEM_ACCOUNTS = ("Admin", "Multihunter", "Taskmaster", "Natars", "Nature", "Support", "Sentry")
+
 DEFAULT_PLAN = {
     # relative priority of each resource when choosing which field to upgrade
     "resource_weights": {"wood": 1.0, "clay": 1.0, "iron": 1.0, "crop": 0.8},
@@ -82,10 +84,20 @@ DEFAULT_PLAN = {
         "max_finish_price": 120,
         # only finish a job that saves at least this many minutes per gold (good value: ~4.5-11 h left)
         "min_minutes_per_gold": 4,
-        # gold every village keeps; the capital keeps more for the weekly Plus/bonus renewals
+        # gold every village keeps (the capital also keeps what its bonus renewals need, worked out from the
+        # bonuses running and the gold it mines; capital_reserve is no longer used, 2026-11-24)
         "reserve": 200,
-        "capital_reserve": 6000,
+        "capital_reserve": 0,
         "max_per_tick": 2,
+        # the capital keeps +25% production running on the weakest resources (1,000 gold for 7 days, Town Center),
+        # renewing it in its last bonus_renew_hours
+        "production_bonus": True,
+        "bonus_renew_hours": 2,
+        # NPC trade (250 gold, needs a Marketplace) when the next field/building would wait this long on one
+        # resource and the village holds enough in total; at most once per npc_cooldown_hours per village
+        "npc": True,
+        "npc_min_wait_minutes": 60,
+        "npc_cooldown_hours": 3,
     },
     "raid": {
         # farm safe targets for resources (travbot/raid.py): inactive players, empty oases and
@@ -103,7 +115,9 @@ DEFAULT_PLAN = {
         "block_days": 3,              # after losses or a defended scouting result
         "active_players": False,
         "farm_accounts": ["Farm", "Farm1", "Farm2", "Farm3", "Farm4", "Farm5"],
-        "exclude": ["Admin", "Multihunter", "Taskmaster", "Natars", "Nature", "Brandon"],  # Brandon: server owner
+        # game/system accounts only: no player gets a no-raid list (Brandon 2026-11-24: on a public server that
+        # would be cheating)
+        "exclude": list(SYSTEM_ACCOUNTS),
         "scout_count": 2,
         "rescout_hours": 24,          # farms are scouted again, oases' animals re-checked, this often
     },
@@ -268,11 +282,14 @@ def validate(raw):
 
     gold = raw.get("gold")
     if isinstance(gold, dict):
-        if isinstance(gold.get("finish_now"), bool):
-            plan["gold"]["finish_now"] = gold["finish_now"]
+        for key in ("finish_now", "production_bonus", "npc"):
+            if isinstance(gold.get(key), bool):
+                plan["gold"][key] = gold[key]
         for key, lo, hi, cast in (("max_finish_price", 10, 1000, int), ("min_minutes_per_gold", 0, 60, float),
-                                  ("reserve", 0, 100000, int),
-                                  ("capital_reserve", 0, 100000, int), ("max_per_tick", 0, 10, int)):
+                                  ("reserve", 0, 2000, int),
+                                  ("capital_reserve", 0, 100000, int), ("max_per_tick", 0, 10, int),
+                                  ("bonus_renew_hours", 0.5, 48, float), ("npc_min_wait_minutes", 10, 1440, float),
+                                  ("npc_cooldown_hours", 0.5, 48, float)):
             v = _num(gold, key, lo, hi, cast)
             if v is not None:
                 plan["gold"][key] = v
@@ -290,9 +307,9 @@ def validate(raw):
             v = _num(raid, key, lo, hi, cast)
             if v is not None:
                 plan["raid"][key] = v
-        for key in ("farm_accounts", "exclude"):
-            if isinstance(raid.get(key), list) and all(isinstance(n, str) for n in raid[key]):
-                plan["raid"][key] = raid[key][:50]
+        if isinstance(raid.get("farm_accounts"), list) and all(isinstance(n, str) for n in raid["farm_accounts"]):
+            plan["raid"]["farm_accounts"] = raid["farm_accounts"][:50]
+        # "exclude" is not taken from the plan file: only the system accounts are never raided (no player list)
 
     champ = raw.get("champion")
     if isinstance(champ, dict):

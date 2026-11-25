@@ -31,6 +31,7 @@ from . import parse, rules
 log = logging.getLogger(__name__)
 
 REINVITE_S = 24 * 3600
+NEVER_PLAYED_S = 600   # last page view within 10 min of sign-up: never really played (2026-11-24)
 RECRUIT_DEFAULTS = {"recruit_after_h": 3, "recruit_per_day": 5, "reinvite_days": 7, "max_invites": 2}
 
 
@@ -177,6 +178,8 @@ class Diplomacy:
                 continue
             if now - p["registered"] < opt["recruit_after_h"] * 3600:
                 continue
+            if p.get("last_active", 0) - p["registered"] < NEVER_PLAYED_S:
+                continue   # never played past sign-up (e.g. accounts an admin created): an invitation is wasted
             r = rec.get(str(p["uid"]), {"times": []})
             if len(r["times"]) >= opt["max_invites"] or (r["times"] and now - r["times"][-1] < opt["reinvite_days"] * 86400):
                 continue

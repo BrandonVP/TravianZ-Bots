@@ -705,3 +705,43 @@ def parse_oasis_troops(html):
         if m and n and n[0] > 0:
             out[int(m.group(1))] = n[0]
     return out
+
+
+_BONUS_KIND = {"lumber": "wood", "wood": "wood", "clay": "clay", "iron": "iron", "crop": "crop"}
+
+
+def parse_bonuses(html):
+    """Town Center production bonuses (capital only): {"left": {kind: seconds left, 0 = off}, "ids": {kind: plus.php
+    id}}. None on another village (the page points to the capital) or without the table."""
+    soup = _soup(html)
+    table = soup.find("table", class_="tz-mbplus-table")
+    if table is None or soup.find("div", class_="tz-mbplus-away") is not None:
+        return None
+    out = {"left": {}, "ids": {}}
+    for tr in table.find_all("tr"):
+        f, s = tr.find("td", class_="tz-f"), tr.find("td", class_="tz-s")
+        if f is None or s is None:
+            continue
+        kind = next((v for k, v in _BONUS_KIND.items() if k in f.get_text(" ", strip=True).lower()), None)
+        if kind is None:
+            continue
+        text, left = s.get_text(" ", strip=True).lower(), 0
+        if "active" in text and "inactive" not in text:
+            for n, unit in re.findall(r"(\d+)\s*([dhm])", text):
+                left += int(n) * {"d": 86400, "h": 3600, "m": 60}[unit]
+            left = max(left, 60)
+        out["left"][kind] = left
+        a = tr.find("a", href=re.compile(r"plus\.php\?id=\d+"))
+        if a:
+            out["ids"][kind] = int(re.search(r"id=(\d+)", a["href"]).group(1))
+    return out if out["left"] else None
+
+
+def parse_npc(html):
+    """Marketplace NPC trade form: {"m1": [wood, clay, iron, crop] as the page shows them} or None (no form)."""
+    soup = _soup(html)
+    form = soup.find("form", attrs={"name": "snd"})
+    if form is None or form.find("input", attrs={"name": "ft", "value": "mk3"}) is None:
+        return None
+    m1 = [int(float(i.get("value") or 0)) for i in form.find_all("input", attrs={"name": "m1[]"})]
+    return {"m1": m1} if len(m1) == 4 else None

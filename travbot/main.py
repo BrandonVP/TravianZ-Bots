@@ -151,6 +151,8 @@ class Bot:
         self.champ_extra = {}      # units the army village keeps so the next champion can be made
         self.last_seen = []        # last round's villages with their state (for letters / requests)
         self.last_plan = None
+        self.bonuses = None        # capital's production bonuses {"left": {kind: s}, "ids": {...}}, re-read each round
+        self.npc_last = {}         # village id -> time of its last NPC trade
 
     def _act(self, cand, href, actions, label):
         from .names import display, display_text
@@ -253,10 +255,95 @@ class Bot:
         actions.append({"action": "train", "name": units.name(unit), "count": count, "slot": slot,
                         "reason": f"target {d['ranged_target']}", "time": int(time.time())})
 
-    def _spend_gold(self, vid, state, plan, actions):
+    def _gold_keep(self, state, plan, capital):
+        """Gold a village keeps: the plan's reserve, and in the capital also what the bonus renewals need."""
+        keep = plan["gold"]["reserve"]
+        if capital and self.bonuses:
+            keep += rules.bonus_keep(self.bonuses["left"], (state.get("gold") or {}).get("prod", 0))
+        return keep
+
+    def _production_bonus(self, state, plan, actions):
+        """Capital: keep +25% production running on the weakest resources (Town Center, 1,000 gold for 7 days).
+        Returns True if a bonus was bought."""
+        if not plan["gold"].get("production_bonus", True) or not state.get("gold"):
+            return False
+        if self.bonuses is None or state["gold"]["amount"] >= rules.BONUS_PRICE \
+                or time.time() - self.bonuses.get("read", 0) > 3600:
+            self.bonuses = self.client.bonuses()
+            if self.bonuses:
+                self.bonuses["read"] = time.time()
+        if not self.bonuses:
+            return False
+        pick = rules.bonus_choice(state, plan, self.bonuses["left"], state["gold"])
+        if not pick:
+            return False
+        kind, why = pick
+        verb = "extend" if self.bonuses["left"].get(kind) else "buy"
+        log.info("[%s] %s%s +25%% %s production for %d gold: %s (gold %d)", self.vname,
+                 "[dry-run] " if self.dry_run else "", verb, kind, rules.BONUS_PRICE, why, state["gold"]["amount"])
+        if self.dry_run:
+            return False
+        before = self.bonuses["left"].get(kind, 0)
+        after = self.client.buy_bonus(kind, self.bonuses["ids"])
+        if not after or after["left"].get(kind, 0) <= before:
+            log.warning("[%s] the game did not start the +25%% %s bonus", self.vname, kind)
+            return False
+        self.bonuses = {**after, "read": time.time()}
+        actions.append({"action": "bonus", "name": f"+25% {kind}", "slot": 0, "reason": why,
+                        "time": int(time.time())})
+        return True
+
+    def _npc(self, vid, state, plan, actions, capital):
+        """NPC trade when the next field or building waits long on one resource while the village holds enough in
+        total (250 gold, Marketplace). Returns True if a trade went through."""
+        g = plan["gold"]
+        gold = state.get("gold")
+        slot = rules.find_slot(state, "Marketplace")
+        if not g.get("npc", True) or not gold or slot is None \
+                or time.time() - self.npc_last.get(vid, 0) < g.get("npc_cooldown_hours", 3) * 3600:
+            return False
+        if gold["amount"] - rules.NPC_PRICE < self._gold_keep(state, plan, capital):
+            return False
+        cands = rules.field_candidates(state, plan) or rules.building_candidates(state, plan)
+        if not cands:
+            return False
+        info = self._inspect(cands[0])
+        if info.get("href") or not info.get("cost") or "workers" in (info.get("status") or "").lower():
+            return False   # affordable already, the build queue is busy, or blocked by something resources do not fix
+        cost = {k: v for k, v in info["cost"].items() if k in ("wood", "clay", "iron", "crop")}
+        wait = rules.seconds_until_affordable(cost, state["resources"])
+        if wait < g.get("npc_min_wait_minutes", 60) * 60:
+            return False
+        form = self.client.npc_form(slot)
+        if not form:
+            return False
+        snap = {k: {"amount": n} for k, n in zip(("wood", "clay", "iron", "crop"), form["m1"])}
+        caps = {k: state["resources"][k]["cap"] for k in snap}
+        target = rules.npc_split(cost, snap, caps)
+        if not target:
+            return False
+        log.info("[%s] %sNPC trade for %s (waited %d min): %s -> %s, %d gold", self.vname,
+                 "[dry-run] " if self.dry_run else "", cands[0]["name"], wait // 60,
+                 form["m1"], [target[k] for k in snap], rules.NPC_PRICE)
+        if self.dry_run:
+            return False
+        self.client.npc_trade(slot, form["m1"], target)
+        self.npc_last[vid] = time.time()
+        actions.append({"action": "npc", "name": f"NPC trade for {cands[0]['name']}", "slot": slot,
+                        "reason": f"waited {int(wait // 60)} min", "time": int(time.time())})
+        # order what the trade was for right away (after it the stock is even, so the ranking could pick another)
+        info = self._inspect(cands[0])
+        if info.get("href"):
+            self._act(cands[0], info["href"], actions, "")
+        else:
+            log.warning("[%s] after the NPC trade %s is still not affordable: %s", self.vname, cands[0]["name"],
+                        info.get("status"))
+        return True
+
+    def _spend_gold(self, vid, state, plan, actions, capital=False):
         """Finish good-value running jobs with spare village gold. Returns True if something was finished."""
         g = plan["gold"]
-        reserve = g["capital_reserve"] if vid is not None and vid == self.capital else g["reserve"]
+        reserve = self._gold_keep(state, plan, capital)
         done = False
         for job in rules.finish_choices(state["queue"], state.get("gold"), reserve, g):
             log.info("[%s] %sfinish %s -> level %s now for %s gold (%d min left, gold %d, keeping %d)",
@@ -566,6 +653,19 @@ class Bot:
             self._defend(state, plan, None, actions)
             state = self.client.village()
 
+        capital = (vid is not None and vid == self.capital) or village_count == 1
+        if capital:
+            try:
+                if self._production_bonus(state, plan, actions):
+                    state = self.client.village()
+            except (requests.RequestException, GameError, ValueError, KeyError) as e:
+                log.warning("[%s] production bonus failed: %s", self.vname, e)
+        try:
+            if self._npc(vid, state, plan, actions, capital) and not self.dry_run:
+                state = self.client.village()
+        except (requests.RequestException, GameError, ValueError, KeyError) as e:
+            log.warning("[%s] NPC trade failed: %s", self.vname, e)
+
         reserved = self._reservation(state, plan)
         if reserved:
             waits.append(reserved["eta"])
@@ -581,7 +681,7 @@ class Bot:
                 state = self.client.village()
 
         # spare gold finishes long jobs first, so their build slot can take a new order right away
-        if self._spend_gold(vid, state, plan, actions) and not self.dry_run:
+        if self._spend_gold(vid, state, plan, actions, capital) and not self.dry_run:
             state = self.client.village()
 
         for pick in (rules.field_candidates, rules.building_candidates):

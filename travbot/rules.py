@@ -69,13 +69,19 @@ def field_candidates(state, plan):
 
     weights = plan["resource_weights"]
 
-    def score(f):
-        # lowest weighted production first, then lowest level
-        return (res[f["kind"]]["prod"] / weights[f["kind"]], f["level"])
+    # Upgrade the resource the village has least of and leave the one it has most of alone (Brandon 2026-11-24,
+    # how he plays the early game). Until then the bot picked the lowest weighted production, which always meant
+    # crop (production is net of upkeep): every bot sat on ~2,500 crop, saving hours for the next crop field while
+    # wood and clay ran out. Crop still comes first when net crop runs low (the min_net_crop branch above).
+    def have(kind):  # stock plus an hour of production, per weight
+        return (res[kind]["amount"] + max(res[kind]["prod"], 0)) / weights[kind]
 
-    fields = sorted((f for f in fields if weights[f["kind"]] > 0), key=score)
+    kinds = {f["kind"] for f in fields if weights[f["kind"]] > 0}
+    if len(kinds) > 1:
+        kinds.discard(max(kinds, key=have))
+    fields = sorted((f for f in fields if f["kind"] in kinds), key=lambda f: (have(f["kind"]), f["level"]))
     return [{"action": "upgrade", "slot": f["slot"], "name": f["kind"] + " field",
-             "reason": f"{f['kind']} production {res[f['kind']]['prod']}/h, field level {f['level']}{spare}"}
+             "reason": f"least {f['kind']} in stock ({int(res[f['kind']]['amount'])}), field level {f['level']}{spare}"}
             for f in fields[:CANDIDATES_PER_CATEGORY]]
 
 
@@ -110,6 +116,11 @@ def building_candidates(state, plan):
     gran = _hours_to_full(res["crop"])
     if gran < buffer_h:
         wanted.append(("Granary", f"granary full in {gran:.1f}h"))
+    level = lambda n: by_name.get(n, (None, 0))[1]
+    gold = state.get("gold") or {}
+    if plan["gold"].get("npc", True) and not level("Marketplace") and gold.get("amount", 0) >= NPC_PRICE \
+            and level("Main Building") >= 3 and level("Warehouse") >= 1 and level("Granary") >= 1:
+        wanted.append(("Marketplace", "NPC trades need a Marketplace"))
     for t in plan["building_targets"]:
         if by_name.get(t["name"], (None, 0))[1] < t["level"]:
             wanted.append((t["name"], f"target level {t['level']}"))
@@ -174,6 +185,82 @@ def finish_choices(queue, gold, reserve, gold_plan):
         out.append(j)
         left -= j["finish_price"]
     return out
+
+
+# --- production bonuses and NPC trades (2026-11-24) ---------------------------------------------------------
+# The capital's gold buys +25% production of one resource for 7 days (Town Center, 1,000 gold). That is the best
+# long-run use of gold at this stage (Brandon's own strategy); an NPC trade (250 gold, needs a Marketplace) is for
+# when the stock is lopsided and the next build waits on one resource. Finish now stays for cheap, long jobs.
+BONUS_PRICE = 1000
+BONUS_DAYS = 7
+NPC_PRICE = 250
+
+
+def bonus_keep(bonuses, gold_prod, price=BONUS_PRICE):
+    """Gold to keep now so every running bonus can be renewed when it ends, counting the gold mined until then.
+    `bonuses`: {kind: seconds left} (0 = not running)."""
+    keep, n = 0.0, 0
+    for left in sorted(s for s in bonuses.values() if s > 0):
+        n += 1
+        keep = max(keep, n * price - max(gold_prod, 0) * left / 3600)
+    return int(max(keep, 0))
+
+
+def bonus_choice(state, plan, bonuses, gold):
+    """(kind, reason) of the production bonus to buy or extend now, or None.
+
+    The bonus goes to the resource the village is shortest of (the same ranking as the fields; crop only while net
+    crop is low). A bonus in its last bonus_renew_hours competes again: it is extended if its resource is still the
+    shortest, else it runs out and the gold goes to the shorter one. Bought only if the gold left still covers the
+    renewals of the bonuses that keep running."""
+    g = plan["gold"]
+    if not g.get("production_bonus", True) or gold is None:
+        return None
+    have, prod = gold["amount"], gold.get("prod", 0)
+    if have < BONUS_PRICE:
+        return None
+    renew_s = g.get("bonus_renew_hours", 2) * 3600
+    ending = {k for k, s in bonuses.items() if 0 < s <= renew_s}
+    free = lambda k: not bonuses.get(k) or k in ending
+    res, weights = state["resources"], plan["resource_weights"]
+    want = sorted((k for k in ("wood", "clay", "iron") if free(k) and weights.get(k, 1) > 0),
+                  key=lambda k: (res[k]["amount"] + max(res[k]["prod"], 0)) / weights.get(k, 1))
+    if res["crop"]["prod"] < plan["min_net_crop"] and free("crop"):
+        want.insert(0, "crop")
+    if not want:
+        return None
+    kind = want[0]
+    after = {k: s for k, s in bonuses.items() if s > 0 and k not in ending}
+    after[kind] = bonuses.get(kind, 0) + BONUS_DAYS * 86400
+    if have - BONUS_PRICE < bonus_keep(after, prod):
+        return None
+    if kind in ending:
+        return kind, f"+25% {kind} ends in {int(bonuses[kind] // 60)} min and {kind} is still the shortest"
+    return kind, f"least {kind} in stock ({int(res[kind]['amount'])}, +{res[kind]['prod']}/h)"
+
+
+def npc_split(cost, resources, caps):
+    """New stock for an NPC trade that pays `cost` now: each resource gets what the cost needs, the rest is
+    shared out evenly (within storage). None if the village does not hold enough in total."""
+    kinds = ("wood", "clay", "iron", "crop")
+    have = {k: int(resources[k]["amount"]) for k in kinds}
+    total = sum(have.values())
+    need = {k: int(cost.get(k, 0)) for k in kinds}
+    if sum(need.values()) > total or any(need[k] > caps[k] for k in kinds):
+        return None
+    out, left = dict(need), total - sum(need.values())
+    while left > 0:
+        open_ = [k for k in kinds if out[k] < caps[k]]
+        if not open_:
+            break
+        share = max(left // len(open_), 1)
+        for k in open_:
+            add = min(share, caps[k] - out[k], left)
+            out[k] += add
+            left -= add
+            if left <= 0:
+                break
+    return out if sum(out.values()) == total else None
 
 
 def is_young(state, richest_production, share_plan):
